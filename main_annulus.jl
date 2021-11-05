@@ -43,20 +43,22 @@ function velocity_profile()
     return VelProfile(reverse(r), reverse(fl[:,2]), reverse(fl[:,3]))
 end
 
-R = 6371f0
-# Instantiate grid
-N = 100
-Nsurf = 180
-nθ, nr = Nsurf, Int(R÷N)
-nθ, nr = 90, 20
-# define earths boundary
+const R = 6371f0
+
+# define earths boundary (this is just for plotting)
+
+Nsurf = 360 # number of points
 xs, zs = circle(Nsurf, R, pop_end = false)
+
+# number of elements in the azimuthal and radial direction
+nθ, nr = 90, 20 
+# Instantiate grid
 gr, G, Gsp = init_annulus(nθ, nr)
 
-# gr.nnods
-
 # find source
-source = closest_point(gr, 0f0, R; system = :polar)
+source_θ = 0f0
+source_r = R
+source = closest_point(gr, source_θ, source_r; system = :polar)
 
 # Load Vp-Vs Earths Profile
 profile = velocity_profile()
@@ -68,42 +70,38 @@ Vp = [interpolant_vp(gr.r[i]) for i in 1:gr.nnods]
 Vs = [interpolant_vs(gr.r[i]) for i in 1:gr.nnods] 
 
 # Find Shortest path
-receiver = closest_point(gr, deg2rad(90f0), R; system = :polar)
 @time D_vp = dijkstra(G, source, gr, Vp);
-@time D_vp = bfm(Gsp, source, gr, Vp);
-@time D_vp = bfm_gpu(Gsp, source, gr, Vp);
+# @time D_vp = bfm(Gsp, source, gr, Vp);
+# @time D_vp = bfm_gpu(Gsp, source, gr, Vp);
 
 # save travel times
 receivers = [closest_point(gr, deg2rad(deg), R; system = :polar) for deg in 0f0:360f0]
 degs = Int(360 ÷ nθ)
 travel_times(D_vp, gr, receivers; isave = false, flname = "vp_$(degs)degs_$(nr)rad.csv")
 
-# Reconstruct ray paths
-p_vp = recontruct_path(D_vp, source, receiver)
-# multiple paths 
-receivers = [closest_point(gr, deg2rad(deg), R; system = :polar) for deg in 10f0:5f0:150f0]
+# find multiple receiver paths paths 
+receivers_θ = 10f0:5f0:150f0
+receivers_r = R
+receivers = [closest_point(gr, deg2rad(deg), receivers_r; system = :polar) for deg in receivers_θ]
 p_vp1 = [recontruct_path(D_vp.prev, source, r) for r in receivers]
 
-# receivers = [closest_point(gr, deg2rad(deg+180), R; system = :polar) for deg in 10f0:5f0:150f0]
-# p_vp2 = [recontruct_path(D_vp, source, r) for r in receivers]
+# Coordinates of a single ray path
+# vp_x, vp_z = gr.x[p_vp1], gr.z[p_vp1]
 
-# Coordinates of the ray path
-vp_x, vp_z = gr.x[p_vp1], gr.z[p_vp1]
-
-# Plot
-f, ax, = lines(xs, zs, color = :black, markersize = 2)
-scatter!(gr.x,gr.z)
-# plot ray paths
-lines!(ax, vp_x, vp_z, color=:red, linewidth=3)
-# lines!(ax, vs_x, vs_z, color=:green, linewidth=3)
-# plot source and receivers
-scatter!(ax, [gr.x[source]], [gr.z[source]],  markersize= 15, color = :magenta, marker='■', label = "source")
-scatter!(ax, [gr.x[receiver]], [gr.z[receiver]],  markersize= 15, color = :magenta, marker='▴', label = "receiver")
-# remove grid from plot
-hidedecorations!(ax, ticklabels = false, ticks = false)
-# twitch aspect ratio
-ax.aspect = DataAspect()
-f
+# # Plot
+# f, ax, = lines(xs, zs, color = :black, markersize = 2)
+# scatter!(gr.x,gr.z)
+# # plot ray paths
+# lines!(ax, vp_x, vp_z, color=:red, linewidth=3)
+# # lines!(ax, vs_x, vs_z, color=:green, linewidth=3)
+# # plot source and receivers
+# scatter!(ax, [gr.x[source]], [gr.z[source]],  markersize= 15, color = :magenta, marker='■', label = "source")
+# scatter!(ax, [gr.x[receiver]], [gr.z[receiver]],  markersize= 15, color = :magenta, marker='▴', label = "receiver")
+# # remove grid from plot
+# hidedecorations!(ax, ticklabels = false, ticks = false)
+# # twitch aspect ratio
+# ax.aspect = DataAspect()
+# f
 
 # Plot
 npaths=length(p_vp1)
