@@ -1,0 +1,427 @@
+abstract type Cartesian end
+abstract type Polar end
+
+mutable struct Point2D{T}
+    x::Float64
+    z::Float64
+end
+
+struct Grid2D{A,B,C,D}
+    x::A
+    z::A
+    θ::A
+    r::A
+    e2n::B
+    nθ::C
+    nr::C
+    nel::C
+    nnods::C
+    neighbours::D
+end
+
+Base.size(gr::Grid2D) = (gr.nθ, gr.nel)
+
+Base.getindex(gr::Grid2D, I) = Point2D{Cartesian}(gr.x[I], gr.z[I])
+
+cartesian2polar(x, z) = (atan(x,z), sqrt(x^2+z^2))
+
+polar2cartesian(x, z) = (z*sin(x), z*cos(x))
+
+function polar2cartesian(x::Vector, z::Vector)
+    return (@. z*sin(x)), (@. z*cos(x))
+end
+
+function init_annulus(nθ::Int64, nr::Int64; r_out = 6371f0, r_in = 6371f0-5153.5f0)
+     
+    r_out = r_out
+    # r_in = r_in
+    nn = nr*nθ # total number of nodes
+    nels = (nr-1)*nθ
+    r = fill(0.0, nn+1)
+    θ = fill(0.0, nn+1)
+    dθ = 2*π/nθ
+    dr = r_out/nr 
+    r_in = r_out - dr*(nr-1)
+
+    # -- Nodal positions
+    @inbounds for ii in 1:nθ
+        idx = @. (1:nr) + nr*(ii-1)
+        r[idx] .= LinRange(r_in, r_out, nr)
+        θ[idx] .= dθ*(ii-1)
+    end
+    # center of the core
+    r[end], θ[end] = 0.0, 0.0
+
+    # -- Quadrilateral elements
+    id_el = Matrix{Int64}(undef, nels, 4)
+    @inbounds for ii in 1:nθ
+        if ii < nθ
+            idx  = @. (1:nr-1) + (nr-1)*(ii-1)
+            idx1 = @. (1:nr-1) + nr*(ii-1)
+            idx2 = @. (1:nr-1) + nr*(ii)
+            id_el[idx,:] .= [idx1 idx2 idx2.+1 idx1.+1]
+        else
+            idx  = @. (1:nr-1) + (nr-1)*(ii-1)
+            idx1 = @. (1:nr-1) + nr*(ii-1)
+            idx2 = @. 1:nr-1
+            id_el[idx,:] .= [idx1 idx2 idx2.+1 idx1.+1]
+        end
+    end
+
+    # -- Triangular elements
+    id_triangle = Matrix{Int64}(undef, nθ, 3)
+    @inbounds for ii in 1:nθ
+        idx1 = 1 + nr*(ii-1)
+        idx2 = idx1 + nr
+        id_triangle[ii, 1] = nn+1
+        id_triangle[ii, 2] = idx1
+        id_triangle[ii, 3] = idx2
+    end
+    id_triangle[end] = 1
+
+    # -- connectivity
+    connectivity = Dict{Int, Vector{Int64}}()
+    @inbounds for ii in 1:nels # rectangular elements
+        connectivity[ii] = id_el[ii,:]
+    end
+    @inbounds for (i, ii) in enumerate(1+nels:nθ+nels) # rectangular elements
+        connectivity[ii] = id_triangle[i,:]
+    end
+
+    neighbours = element_neighbours(connectivity)
+    nel = length(connectivity)
+    x, z = polar2cartesian(θ, r)
+
+    gr = Grid2D(x,
+        z,
+        θ,
+        r,
+        connectivity,
+        nθ,
+        nr,
+        nel,
+        length(x),
+        neighbours
+    )
+
+    gr, G, K = add_midpoints(gr)
+
+    return gr, G, K
+end
+
+function element_neighbours(e2n)    
+    # els = size(e2n,1) == 3 ? e2n : view(e2n, 1:3,:)
+    nel = length(e2n)
+
+    # Incidence matrix
+    I, J, V = Int[], Int[], Bool[]
+    @inbounds for i in eachindex(e2n)
+        element = e2n[i]
+        for j in eachindex(element)
+            node = element[j]
+            push!(I, node)
+            push!(J, i)
+            push!(V, true)
+        end
+    end
+    incidence_matrix = sparse(J, I, V)
+
+    # Find neighbouring elements
+    neighbour = [Int64[] for _ in 1:nel]
+    @inbounds for node in 1:nel
+        # Get elements sharing node
+        r = nzrange(incidence_matrix, node)
+        el_neighbour = incidence_matrix.rowval[r]
+        # Add neighbouring elements to neighbours map
+        for iel1 in el_neighbour
+            current_neighbours = neighbour[iel1]
+            for iel2 in el_neighbour
+                # check for non-self neighbour and avoid repetitions
+                if (iel1!=iel2) && (iel2 ∉ current_neighbours)
+                    push!(neighbour[iel1],iel2)
+                end
+            end
+        end
+    end
+
+    return neighbour
+end
+
+function map_edges(e2n, i, map_triangle, map_rectangle)
+    element = e2n[i]
+    local_map = length(element) == 4 ? map_rectangle : map_triangle
+    e2n[i][local_map]
+end
+
+function edge_connectivity(gr)
+    e2n, neighbours = gr.e2n, gr.neighbours
+    nel = gr.nel
+
+    map_triangle = [ 1 2 3
+                     2 3 1]
+    map_rectangle = [ 1 2 3 4
+                      2 3 4 1]
+    global_idx = 0
+    el2edge = fill(0, 4, nel)
+    edge2node = Vector{Int64}[]
+    edge_neighbour = Matrix{Int64}(undef, 2, 4)
+
+    edge2el = Dict{Int, Set{Int}}()
+    @inbounds for iel in 1:nel
+        element = e2n[iel]
+        # local_map = length(element) == 4 ? map_rectangle : map_triangle
+        # # local edge
+        # edge = element[local_map] 
+        edge = map_edges(e2n, iel, map_triangle, map_rectangle)
+        sort!(edge, dims=1)
+        
+        # neighbours of local element
+        el_neighbours = neighbours[iel]
+        edge_neighbours = [map_edges(e2n, i, map_triangle, map_rectangle) for i in el_neighbours]
+
+        # check edge by edge
+        nedge = length(element)
+        for iedge in 1:nedge
+            if el2edge[iedge, iel] == 0
+                global_idx += 1
+                el2edge[iedge, iel] = global_idx
+                push!(edge2node, view(edge,:, iedge))
+
+                if !haskey(edge2el, global_idx)
+                    edge2el[global_idx] = Set{Int}()
+                end
+                push!(edge2el[global_idx], iel)
+
+                # edges the neighbours
+                for (c, ieln) in enumerate(el_neighbours)
+                    edge_neighbour = edge_neighbours[c]
+                    sort!(edge_neighbour, dims=1)
+
+                    # check wether local edge is in neighbouring element
+                    for i in 1:nedge
+                        if issubset(edge[:, iedge], edge_neighbour)
+                            el2edge[i, ieln] = global_idx
+                            push!(edge2el[global_idx], ieln)
+                            break
+                        end
+                    end
+
+                end
+
+            end
+        end
+
+    end
+
+    # Make dictionaries
+    edge_nodes = Dict{Int, NTuple{2, Int}}()
+    @inbounds for i in 1:length(edge2node)
+        edge_nodes[i] = (edge2node[i][1], edge2node[i][2])
+    end
+    element_edge = Dict{Int, Vector{Int}}()
+    @inbounds for i in axes(el2edge,2)
+        idx = findlast(view(el2edge, :, i) .> 0)
+        if idx == 4
+            element_edge[i] = el2edge[:, i]
+
+        else
+            element_edge[i] = el2edge[1:idx, i]
+        end
+    end
+
+    return element_edge, edge_nodes, edge2el
+
+end
+
+function add_midpoints(gr; star_levels = 1)
+    
+    e2n, θ, r = gr.e2n, gr.θ, gr.r
+
+    el2edge, edges2node, edge2el = edge_connectivity(gr)
+    nedges = length(edges2node)
+    # make mid points
+    nnods = length(edges2node) * 25
+    θmid = Vector{Float64}(undef, nnods)
+    rmid = similar(θmid)
+    ϵ =  2π-(1-1/gr.nθ)
+    icenter = gr.nr*gr.nθ + 1
+
+    # main loop
+    global_idx = 0
+    nnods0 = length(r)
+    L = 0
+    @inbounds for i in 1:nedges
+        idx = edges2node[i]
+        #edge coordinates
+        θbar = (θ[edges2node[i][1]], θ[edges2node[i][2]])
+        rbar = (r[edges2node[i][1]], r[edges2node[i][2]])
+
+        if icenter ∉ idx
+            if abs.(θbar[1] - θbar[2]) >= ϵ
+                if θbar[1] < π
+                    θbar = (θbar[1]+2π, θbar[2]) 
+                
+                elseif θbar[2] < π
+                    θbar = (θbar[1], θbar[2]+2π)
+                end
+            end
+        else
+            θmax = maximum(θbar)
+            θbar = (θmax, θmax)
+        end
+
+        if θbar[1] == θbar[2]
+            # use euclidean length
+            L = sqrt(rbar[1]^2+rbar[2]^2-2*rbar[1]*rbar[2]*cos(θbar[1]-θbar[2]))
+        else
+            # use arc length
+            L = rbar[1]*abs(θbar[2]-θbar[1])
+        end
+        npoints = 9#Int(L ÷ 20)
+        # add npoints to i-th edge
+        if npoints > 0
+            for j in 1:npoints
+                # global index
+                global_idx += 1
+                # edge lenght
+                Lθ = (θbar[2]-θbar[1])
+                Lr = (rbar[2]-rbar[1])
+                # increment from 1st node of the edge
+                Δθ = Lθ * j / (npoints+1)
+                Δr = Lr * j / (npoints+1)
+                # new coordinate
+                θmid[global_idx] = θbar[1] + Δθ
+                rmid[global_idx] = rbar[1] + Δr
+
+                # add node to connectivity matrix
+                for iel in edge2el[i]
+                    push!(gr.e2n[iel], global_idx+nnods0)
+                end
+            end
+        end
+
+    end
+
+    θnew, rnew = vcat(θ, θmid[1:global_idx]), vcat(r, rmid[1:global_idx])
+    x, z = polar2cartesian(θnew, rnew)
+
+    gr = Grid2D(
+        x,
+        z,
+        θnew,
+        rnew,
+        e2n,
+        gr.nθ,
+        gr.nr,
+        gr.nel,
+        length(x),
+        gr.neighbours
+    )
+
+    G, K = nodal_incidence(gr, star_levels = 1)
+
+    return gr, G, K 
+
+end
+
+function point_ids(M::Grid2D)
+
+    top = "outter"
+    bot = "inner"
+    inner = "inside"
+
+    nnod = length(M.r)
+    IDs = Vector{String}(undef,nnod)
+
+    rmin, rmax = extrema(M.r)
+    
+    @inbounds for (i, ri) in enumerate(M.r)
+        if ri == rmax
+            IDs[i] = top
+        elseif ri == rmin
+            IDs[i] = bot
+        else
+            IDs[i] = inner
+        end
+    end
+
+    return IDs
+end
+
+function nodal_incidence(gr::Grid2D; star_levels = 1)
+    connectivity_matrix = gr.e2n
+    nels = gr.nel
+    nnods = length(gr.x)
+
+    Q = Dict{Int, Set{Int}}() # 26 = max num of neighbours
+    N = zeros(Int, nnods) # num of neighbours found
+
+    for i in 1:nels
+        element_nodes = connectivity_matrix[i]
+        for nJ in element_nodes
+            if !haskey(Q, nJ)
+                Q[nJ] = Set{Int64}()
+            end
+            Qi = Q[nJ]
+            for nI in element_nodes
+                if nI != nJ && nI ∉ Qi
+                    # update helpers
+                    N[nJ] += 1
+                    push!(Q[nJ], nI)
+                end
+            end
+        end
+    end
+
+    # Convert it to sparse array (better for GPU)
+    I, J, V = Int[], Int[], Bool[]
+    for (i, Qi) in Q
+         for Qj in Qi
+            push!(J, i) # nodes go along columns (CSC format)
+            push!(I, Qj)
+            push!(V, true)
+        end
+    end
+    K = sparse(I, J, V)
+    
+    return Q, K
+end
+
+distance(ax::Real, az::Real, bx::Real, bz::Real) = √((ax-bx)^2 + (az-bz)^2)
+
+distance(a::Point2D{Cartesian}, b::Point2D{Cartesian}) = √((a.x-b.x)^2 + (a.z-b.z)^2)
+
+function closest_point(gr, px::T, pz::T; system = :cartesian) where T
+    n = length(gr.x)
+    dist = typemax(T)
+    di = 0.0
+    index = -1
+    for i in 1:n
+
+        if system == :cartesian
+            @inbounds di = distance(gr.x[i], gr.z[i], px, pz)
+        
+        elseif system == :polar
+            @inbounds di = distance(gr.θ[i], gr.r[i], px, pz)
+        
+        end
+
+        if di < dist
+            index = i
+            dist = di
+        end
+
+    end
+    return index
+end
+
+function circle(N, r; pop_end = true) 
+    t = LinRange(0, Float32(2π), N)
+    x = @. r*cos(t)
+    z = @. r*sin(t)
+    if pop_end
+        pop!(x)
+        pop!(z)
+    end
+    return x, z
+end
