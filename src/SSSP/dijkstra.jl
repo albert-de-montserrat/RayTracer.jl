@@ -6,7 +6,7 @@
 # parallelization or vectorization.
 
 struct Dijkstra{T, M}
-    prev::Dict{T, T}
+    prev::T
     dist::M
 end
 
@@ -99,31 +99,31 @@ function dijkstra(G::Dict, source::Int, gr, U::Vector{T}) where T
         # the frontier node is the one with the mininum distance
         Qi = min_distance(Q, dist) 
 
-        # cache coordinates, velocity and distance of frontier node
-        xi, zi, Ui, di = gr.x[Qi], gr.z[Qi], U[Qi], dist[Qi]
+        # # cache coordinates, velocity and distance of frontier node
+        # xi, zi, Ui, di = gr.x[Qi], gr.z[Qi], U[Qi], dist[Qi]
 
-        # relax nodes adjacent to the frontier
-        for i in G[Qi]
+        # # relax nodes adjacent to the frontier
+        # for i in G[Qi]
 
-            # skips lines below if i ∈ settled = true
-            i ∈ settled && continue 
+        #     # skips lines below if i ∈ settled = true
+        #     i ∈ settled && continue 
             
-            # temptative distance of successor
-            δ = di + 2*distance(xi, zi, gr.x[i], gr.z[i])/abs(U[i]+Ui)
+        #     # temptative distance of successor
+        #     δ = di + 2*distance(xi, zi, gr.x[i], gr.z[i])/abs(U[i]+Ui)
 
-            # update distance if it's smaller than 
-            # the temptative distance
-            if δ < dist[i]
-                # update previous node of the path
-                p[i] = Qi
-                # update distance of successor
-                dist[i] = δ
-                # push successor to the queuq
-                push!(Q, i)
-            end
-        end
+        #     # update distance if it's smaller than 
+        #     # the temptative distance
+        #     if δ < dist[i]
+        #         # update previous node of the path
+        #         p[i] = Qi
+        #         # update distance of successor
+        #         dist[i] = δ
+        #         # push successor to the queuq
+        #         push!(Q, i)
+        #     end
+        # end
 
-        # _relax_dijkstra!(p, dist, Q, gr, G, Qi, U, settled)
+        _relax_dijkstra!(p, dist, Q, gr, G, Qi, U, settled)
 
         # remove settled node from the queue
         delete!(Q, Qi)
@@ -140,40 +140,30 @@ function dijkstra(G::Dict, source::Int, gr, U::Vector{T}) where T
     return Dijkstra(p, dist)
 end
 
-function _relax_dijkstra!(p, dist, Q, gr, G, Qi, U, settled)
+@views function _relax_dijkstra!(p, dist, Q, gr, G, Qi, U, settled)
     # cache coordinates, velocity and distance of frontier node
     xi, zi, Ui, di = gr.x[Qi], gr.z[Qi], U[Qi], dist[Qi]
 
-    visited = Set{Int}()
     # relax nodes adjacent to the frontier
-    for Gi in G[Qi]
+    for i in G[Qi]
 
-        for i in G[Gi] # <- star level 2
-
-            # escape in case of redundancy
-            i ∈ visited && continue
+        # skips lines below if i ∈ settled = true
+        i ∈ settled && continue 
             
-            # update visited queue
-            push!(visited, i)
-            # skips lines below if i ∈ settled = true
-            i ∈ settled && continue 
-            
-            # temptative distance of successor
-            δ = di + 2*distance(xi, zi, gr.x[i], gr.z[i])/abs(U[i]+Ui)
+        # temptative distance of successor
+        δ = di + 2*distance(xi, zi, gr.x[i], gr.z[i])/abs(U[i]+Ui)
 
-            # update distance if it's smaller than 
-            # the temptative distance
-            if δ < dist[i]
-                # update previous node of the path
-                p[i] = Qi
-                # update distance of successor
-                dist[i] = δ
-                # push successor to the queuq
-                push!(Q, i)
-            end
+        # update distance if it's smaller than 
+        # the temptative distance
+        if δ < dist[i]
+            # update previous node of the path
+            p[i] = Qi
+            # update distance of successor
+            dist[i] = δ
+            # push successor to the queuq
+            push!(Q, i)
         end
 
-        empty(visited)
     end
 end
 

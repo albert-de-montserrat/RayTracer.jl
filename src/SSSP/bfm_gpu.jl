@@ -75,23 +75,28 @@ end
 function _gpu_relaxation_BFM!(Q, K, p, dist, dist0, n1, n2, x, z, U)
 
     index = (blockIdx().x-1) * blockDim().x + threadIdx().x
-    T = Float32
+    T = typemax(Float32)
 
     if index < length(Q)
 
         if Q[index]
 
-            di = dist0[index]
-
+            di::Float64 = dist0[index]
+            # xi::Float64, zi::Float64, Ui::Float64 = x[index], z[index], U[index]
             # TODO cache out xj yj zj ?
             for i in n1[index]:n2[index]
                 Gi = K[i]
                 # temptative distance (ignore if it's ∞)
                 δ = ifelse(
-                   dist0[Gi] == typemax(T),
-                   typemax(T),
+                   dist0[Gi] == T,
+                   T,
                    dist0[Gi] + 2*distance(x[index], z[index], x[Gi], z[Gi])/abs(U[index]+U[Gi])
                 )
+                # δ = ifelse(
+                #    dist0[Gi] == T,
+                #    T,
+                #    dist0[Gi] + 2*distance(xi, zi, x[Gi], z[Gi])/abs(Ui+U[Gi])
+                # )
                 # update distance and predecessor index 
                 # if it's smaller than the temptative distance
                 if di > δ
@@ -123,24 +128,24 @@ function relaxation_BFM!(Q::CuArray{Bool}, dist::CuArray, dist0::CuArray, p::CuA
     end
 end
 
-@kernel function potato!(Q, K, n1, n2, dist, dist0)
-    index = @index(Global)
+# @kernel function potato!(Q, K, n1, n2, dist, dist0)
+#     index = @index(Global)
     
-    if index < length(Q)
-        @inbounds if dist[index] < dist0[index]        
-            for i in n1[index]:n2[index]
-                Q[K[i]] = true
-            end
-        end
-    end
+#     if index < length(Q)
+#         @inbounds if dist[index] < dist0[index]        
+#             for i in n1[index]:n2[index]
+#                 Q[K[i]] = true
+#             end
+#         end
+#     end
 
-end
+# end
 
-function foo!(Q, K, n1, n2, dist, dist0)
-    kernel! = potato!(CUDADevice(), 256)
-    event = kernel!(Q, K, n1, n2, dist, dist0, ndrange=length(Q))
-    wait(event)
-end
+# function foo!(Q, K, n1, n2, dist, dist0)
+#     kernel! = potato!(CUDADevice(), 256)
+#     event = kernel!(Q, K, n1, n2, dist, dist0, ndrange=length(Q))
+#     wait(event)
+# end
 
 function _gpu_update_bfm!(Q, K, n1, n2, dist, dist0)
 
@@ -148,7 +153,6 @@ function _gpu_update_bfm!(Q, K, n1, n2, dist, dist0)
     # than the previous one, add to adjecent 
     # to the queue nodes
     index = (blockIdx().x-1) * blockDim().x + threadIdx().x
-    # T = Float32
     if index < length(Q)
         
         @inbounds if dist[index] < dist0[index]
@@ -206,3 +210,10 @@ function move2device(K, U, gr)
     return graph_d, mesh_d
 
 end
+
+# macro device(A::Union{Expr, Symbol})
+#     T = eltype($A)
+#     T isa Float64 && T = Float32
+#     T isa Int64 && T = Int32
+#     esc(:())
+# end

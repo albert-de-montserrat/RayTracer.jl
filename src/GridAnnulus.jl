@@ -1,12 +1,12 @@
 abstract type Cartesian end
 abstract type Polar end
 
-mutable struct Point2D{T}
+struct Point2D{T}
     x::Float64
     z::Float64
 end
 
-struct Grid2D{A,B,C,D}
+struct Grid2D{A,B,C,D,E}
     x::A
     z::A
     θ::A
@@ -17,21 +17,59 @@ struct Grid2D{A,B,C,D}
     nel::C
     nnods::C
     neighbours::D
+    element_type::E
 end
 
-Base.size(gr::Grid2D) = (gr.nθ, gr.nel)
+Base.length(gr::Grid2D) = gr.nnods
 
-Base.getindex(gr::Grid2D, I) = Point2D{Cartesian}(gr.x[I], gr.z[I])
+Base.getindex(gr::Grid2D, I) = Point2D{Polar}(gr.θ[I], gr.r[I])
 
-cartesian2polar(x, z) = (atan(x,z), sqrt(x^2+z^2))
+# macro polar(θ::Union{Real, Symbol, Expr}, r::Union{Real, Symbol, Expr}) 
+#     esc(:( atan($θ, $r), sqrt($θ*$θ + $r*$r) )) 
+# end
 
-polar2cartesian(x, z) = (z*sin(x), z*cos(x))
+# macro polar(θ::Union{Vector, Symbol, Expr}, r::Union{Vector, Symbol, Expr})
+#     quote
+#         th = atan.($θ, $r)
+#         for i in eachindex(th)
+#             @inbounds if th[i] < 0
+#                 th[i] +=2π
+#             end 
+#         end
+#     end
+#     esc(:( $th,  @.(sqrt($θ*$θ + $r*$r)) )) 
+# end
 
-function polar2cartesian(x::Vector, z::Vector)
-    return (@. z*sin(x)), (@. z*cos(x))
+macro cartesian(x::Union{Vector, Symbol, Expr}, z::Union{Vector, Symbol, Expr}) 
+    esc(:( @.($z*sin($x)), @.($z*cos($x)) )) 
 end
 
-function init_annulus(nθ::Int64, nr::Int64; r_out = 6371f0, r_in = 6371f0-5153.5f0)
+function cartesian2polar(x::T, z::T) where T<:Real 
+    θ = atan(x,z)
+    if θ < 0
+        θ += 2π
+    end 
+    return (θ, sqrt(x^2+z^2))
+end
+
+function cartesian2polar(x::Vector, z::Vector) where T<:Real 
+    θ = @. atan(x,z)
+    for i in eachindex(θ)
+        if θ[i] < 0
+            θ[i] +=2π
+        end 
+    end
+    return (θ, @.(sqrt(x^2+z^2)))
+end
+
+polar2cartesian(x::T, z::T) where T<:Real = (z*sin(x), z*cos(x))
+
+polar2cartesian(x::Vector, z::Vector) = (@. z*sin(x)), (@. z*cos(x))
+
+function init_annulus(
+    nθ::Int64, nr::Int64; spacing = 20, r_out = 6371f0, r_in = 6371f0-5153.5f0,
+    star_levels = 0
+    )
      
     r_out = r_out
     # r_in = r_in
@@ -71,26 +109,28 @@ function init_annulus(nθ::Int64, nr::Int64; r_out = 6371f0, r_in = 6371f0-5153.
     # -- Triangular elements
     id_triangle = Matrix{Int64}(undef, nθ, 3)
     @inbounds for ii in 1:nθ
-        idx1 = 1 + nr*(ii-1)
-        idx2 = idx1 + nr
+        idx = 1 + nr*(ii-1)
         id_triangle[ii, 1] = nn+1
-        id_triangle[ii, 2] = idx1
-        id_triangle[ii, 3] = idx2
+        id_triangle[ii, 2] = idx
+        id_triangle[ii, 3] = idx + nr
     end
     id_triangle[end] = 1
 
-    # -- connectivity
+    # -- connectivity and element type
+    element_type = Dict{Int, Symbol}()
     connectivity = Dict{Int, Vector{Int64}}()
     @inbounds for ii in 1:nels # rectangular elements
         connectivity[ii] = id_el[ii,:]
+        element_type[ii] = :Quad
     end
-    @inbounds for (i, ii) in enumerate(1+nels:nθ+nels) # rectangular elements
+    @inbounds for (i, ii) in enumerate(1+nels:nθ+nels) # triangular elements
         connectivity[ii] = id_triangle[i,:]
+        element_type[ii] = :Tri
     end
 
     neighbours = element_neighbours(connectivity)
     nel = length(connectivity)
-    x, z = polar2cartesian(θ, r)
+    x, z = @cartesian(θ, r)
 
     gr = Grid2D(x,
         z,
@@ -101,12 +141,190 @@ function init_annulus(nθ::Int64, nr::Int64; r_out = 6371f0, r_in = 6371f0-5153.
         nr,
         nel,
         length(x),
-        neighbours
+        neighbours,
+        element_type
     )
 
-    gr, G, K = add_midpoints(gr)
+    G0 = nodal_incidence(gr, star_levels = 1)
 
-    return gr, G, K
+    # degrees = nodal_degree(G0)
+    # prm = symrcm(G0, degrees)
+    # reorder!( gr, prm)
+
+    # G0 = nodal_incidence(gr, star_levels = 1)
+
+    gr, G = add_midpoints(gr, spacing = spacing)
+
+    # G02 = deepcopy(G)
+
+    # degrees = nodal_degree(G)
+    # prm = symrcm(G, degrees)
+    # reorder!( gr, prm)
+
+    # G = nodal_incidence(gr, star_levels = 1)
+    
+    # add velocity boundaries
+    layers = velocity_layers(gr)
+    global_idx = nnods0 = length(gr.x)
+    for l in layers
+        # cartesian coordinates of the boundary
+        θl, rl = l[1], l[2]
+
+        for (θi, ri) in zip(θl, rl)
+            # new node global index
+            global_idx += 1
+            # find element where new node belongs
+            θreps = Int(fld(θi, dθ))
+            rreps = Int(cld(ri, dr))
+            iel = (nr-1)*θreps + rreps - 1
+            # add to connectivity matrix
+            push!(gr.e2n[iel], global_idx)
+            # add  to elements on both sides
+            if θi == 0
+                θreps = Int(fld(2π, dθ))
+                push!(gr.e2n[(nr-1)*θreps + rreps - 1], global_idx)
+            end
+        end
+    end
+
+    # concatenate nodes of velocity boundaries
+    θboundary = reduce(vcat, l[1] for l in layers)
+    rboundary = reduce(vcat, l[2] for l in layers)
+    # convert to polar coordinates
+    xboundary, zboundary = polar2cartesian(θboundary, rboundary)
+
+    gr = Grid2D(
+        vcat(gr.x, xboundary),
+        vcat(gr.z, zboundary),
+        vcat(gr.θ, θboundary),
+        vcat(gr.r, rboundary),
+        gr.e2n,
+        nθ,
+        nr,
+        nel,
+        gr.nnods + length(xboundary),
+        gr.neighbours,
+        gr.element_type
+    )
+
+    G = nodal_incidence(gr, star_levels = 1)
+
+    # expand adjency of boundary nodes
+    G02 = deepcopy(G)
+    for i in (nnods0+1):gr.nnods
+        for idx in G02[i]
+            union!(G[i], G02[idx])
+        end
+    end
+
+    
+    if star_levels > 0
+        for _ in 1:star_levels
+            G02 = deepcopy(G)
+            for (i, G0i) in G0
+                for j in G0i
+                    union!(G[i], G02[j])
+                end
+                delete!(G[i],i)
+            end
+        end
+    end
+
+    cleanse_graph!(G)
+
+    # # reorder nodes
+    # degrees = nodal_degree(G)
+    # prm = symrcm(G, degrees)
+    # reorder!(gr, prm)
+    # G = nodal_incidence(gr, star_levels = 1)
+
+    constrain2layers!(G, gr)
+
+    # make sparse array
+    # Gsp = graph2sparse(G)
+
+    return gr, G
+end
+
+function velocity_layers(gr; npoints = 180)
+    r = R.-(20f0, 35f0, 210f0, 410f0, 660f0, 2740f0, 2891.5f0)
+    # layers = [circle(npoints, r, pop_end = false) for r in r]
+    idx = gr.r.== R
+    n = sum(idx)
+    θl = gr.θ[idx]
+    layers = [(θl, fill(r[1], n)) for r in r]
+    return layers
+end
+
+function constrain2layers!(G, gr)
+    rlayer = [R, R-20, R-35, R-210, R-410, R-660, R-2740, R-2891.5]
+    r = gr.r
+    for (i, Gi) in G
+        # ri = round(r[i], digits=2)
+        ri = r[i]
+        
+        if ri ∉ rlayer
+            upper_limit, lower_limit = find_layer(ri, rlayer)
+
+            for idx in Gi
+                (upper_limit ≥ r[idx] ≥ lower_limit) && continue
+                delete!(G[i], idx)
+            end
+
+        elseif ri == R
+            upper_limit, lower_limit = R, rlayer[2]
+
+            for idx in Gi
+                (r[idx] < lower_limit) && delete!(G[i], idx)
+            end
+
+        elseif ri == rlayer[end]
+            upper_limit, lower_limit = rlayer[end-1], 0f0
+
+            for idx in Gi
+                (r[idx] > upper_limit) && delete!(G[i], idx)
+            end
+
+        elseif ri ∈ @views rlayer[2:end-1]
+            idx = findall(ri .== rlayer)[1]
+            upper_limit, lower_limit = rlayer[idx-1], rlayer[idx+1]
+
+            for idx in Gi
+                upper_limit ≥ r[idx] ≥ lower_limit && continue
+                delete!(G[i], idx)
+            end
+
+        end
+    end
+
+end
+
+function find_layer(ri, rlayer)
+    ri < rlayer[end] && return (rlayer[end], 0f0)
+    for i in 1:length(rlayer)-1
+        if rlayer[i] > ri > rlayer[i+1]
+            return (rlayer[i], rlayer[i+1])
+        end
+    end
+end
+
+function graph2sparse(G)
+    # Convert it to sparse array (better for GPU)
+    I, J, V = Int[], Int[], Bool[]
+    for (i, Gi) in G
+         for Gj in Gi
+            push!(J, i) # nodes go along columns (CSC format)
+            push!(I, Gj)
+            push!(V, true)
+        end
+    end
+    K = sparse(I, J, V)
+end
+
+function cleanse_graph!(G)
+    for (i, Gi) in G
+        i ∈ Gi && delete!(G[i], i)
+    end
 end
 
 function element_neighbours(e2n)    
@@ -233,23 +451,26 @@ function edge_connectivity(gr)
 
 end
 
-function add_midpoints(gr; star_levels = 1)
+function add_midpoints(gr; spacing = 20)
     
     e2n, θ, r = gr.e2n, gr.θ, gr.r
 
-    el2edge, edges2node, edge2el = edge_connectivity(gr)
+    _, edges2node, edge2el = edge_connectivity(gr)
     nedges = length(edges2node)
     # make mid points
-    nnods = length(edges2node) * 25
+    nnods = length(edges2node) * 40
     θmid = Vector{Float64}(undef, nnods)
     rmid = similar(θmid)
     ϵ =  2π-(1-1/gr.nθ)
     icenter = gr.nr*gr.nθ + 1
+    center = closest_point(gr, 0f0, 0f0; system = :polar) # id of node at the center of the universe
 
+    mid2nodes = Dict{Int, NTuple{2, Int}}()
+    
     # main loop
     global_idx = 0
     nnods0 = length(r)
-    L = 0
+    L = 0f0
     @inbounds for i in 1:nedges
         idx = edges2node[i]
         #edge coordinates
@@ -277,7 +498,8 @@ function add_midpoints(gr; star_levels = 1)
             # use arc length
             L = rbar[1]*abs(θbar[2]-θbar[1])
         end
-        npoints = 9#Int(L ÷ 20)
+        # npoints = Int(L ÷ spacing)
+        npoints = 9
         # add npoints to i-th edge
         if npoints > 0
             for j in 1:npoints
@@ -292,18 +514,19 @@ function add_midpoints(gr; star_levels = 1)
                 # new coordinate
                 θmid[global_idx] = θbar[1] + Δθ
                 rmid[global_idx] = rbar[1] + Δr
-
                 # add node to connectivity matrix
                 for iel in edge2el[i]
                     push!(gr.e2n[iel], global_idx+nnods0)
                 end
+                # # update dictionary
+                mid2nodes[global_idx+nnods0] = idx
             end
         end
 
     end
 
     θnew, rnew = vcat(θ, θmid[1:global_idx]), vcat(r, rmid[1:global_idx])
-    x, z = polar2cartesian(θnew, rnew)
+    x, z = @cartesian(θnew, rnew)
 
     gr = Grid2D(
         x,
@@ -315,13 +538,24 @@ function add_midpoints(gr; star_levels = 1)
         gr.nr,
         gr.nel,
         length(x),
-        gr.neighbours
+        gr.neighbours,
+        gr.element_type
     )
 
-    G, K = nodal_incidence(gr, star_levels = 1)
+    G = nodal_incidence(gr, star_levels =1)
 
-    return gr, G, K 
+    # expand adjacency list of edge nodes 
+    # @inbounds 
+    for (imid, ibar) in mid2nodes
+        if  center ∉ G[ibar[1]]
+            union!(G[imid], G[ibar[1]])
+        end
+        if  center ∉ G[ibar[2]]
+            union!(G[imid], G[ibar[2]])
+        end
+    end
 
+    return gr, G
 end
 
 function point_ids(M::Grid2D)
@@ -352,7 +586,6 @@ function nodal_incidence(gr::Grid2D; star_levels = 1)
     connectivity_matrix = gr.e2n
     nels = gr.nel
     nnods = length(gr.x)
-
     Q = Dict{Int, Set{Int}}() # 26 = max num of neighbours
     N = zeros(Int, nnods) # num of neighbours found
 
@@ -373,18 +606,18 @@ function nodal_incidence(gr::Grid2D; star_levels = 1)
         end
     end
 
-    # Convert it to sparse array (better for GPU)
-    I, J, V = Int[], Int[], Bool[]
-    for (i, Qi) in Q
-         for Qj in Qi
-            push!(J, i) # nodes go along columns (CSC format)
-            push!(I, Qj)
-            push!(V, true)
-        end
-    end
-    K = sparse(I, J, V)
+    # # Convert it to sparse array (better for GPU)
+    # I, J, V = Int[], Int[], Bool[]
+    # for (i, Qi) in Q
+    #      for Qj in Qi
+    #         push!(J, i) # nodes go along columns (CSC format)
+    #         push!(I, Qj)
+    #         push!(V, true)
+    #     end
+    # end
+    # K = sparse(I, J, V)
     
-    return Q, K
+    return Q
 end
 
 distance(ax::Real, az::Real, bx::Real, bz::Real) = √((ax-bx)^2 + (az-bz)^2)
@@ -417,8 +650,8 @@ end
 
 function circle(N, r; pop_end = true) 
     t = LinRange(0, Float32(2π), N)
-    x = @. r*cos(t)
-    z = @. r*sin(t)
+    x = @. r*sin(t)
+    z = @. r*cos(t)
     if pop_end
         pop!(x)
         pop!(z)

@@ -73,7 +73,7 @@ function bfm(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where T
     x, z = gr.x, gr.z
 
     # number of nodes in the graph
-    n = Gsp.n
+    n = length(x)
 
     # allocate dictionary containing best previous nodes
     # p = Dict{M, M}()
@@ -87,7 +87,7 @@ function bfm(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where T
     # priority queue containing NOT settled nodes
     Q = falses(n)
     # 1st frontier nodes are nodes adjacent to the source
-    for Gi in Gsp.rowval[nzrange(Gsp, source)]
+    @inbounds for Gi in @views Gsp.rowval[nzrange(Gsp, source)]
         Q[Gi] = true
     end
 
@@ -96,10 +96,10 @@ function bfm(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where T
     dist[source] = zero(T)
     dist0 = deepcopy(dist)
 
-    # main lopp
+    # main loop
     it = 1
     # covergence: if the queue is empty we are done
-    @inbounds while sum(Q) != 0
+    while sum(Q) != 0
         
         # relax edges (parallel process)
         _relax_bfm!(dist, p, dist0, Gsp, Q, x, z, U)
@@ -125,7 +125,67 @@ end
 
 fillfalse!(A) = fill!(A, false)
 
-@inbounds function _relax_bfm!(dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::BitVector, x, z, U) where T
+function foo!(dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::BitVector, x, z, U) where T
+    # iterate over queue. Unfortunately @threads can't iterate 
+    # over a Set, so we need to collect() it. This yields an 
+    # allocation, but it's worth it in this case as it saves 
+    # a decent number of empty iterations and removes a layer
+    # of branching
+
+    idx = findall(Q)
+    xx = @views x[idx]
+    zz = @views z[idx]
+    UU = @views U[idx]
+
+    degrees = [length(nzrange(G, i)) for i in idx] 
+    max_degree = maximum(degrees)
+    xbuffer = fill(NaN, max_degree,length(degrees))
+    zbuffer = fill(NaN, max_degree, length(degrees))
+    Ubuffer = fill(NaN, max_degree, length(degrees))
+    d0buffer = fill(NaN, max_degree, length(degrees))
+
+    # Threads.@threads 
+    for ii in eachindex(idx)
+        # iterate over adjacent nodes to find the the one with 
+        # the mininum distance to current node
+        for (j, Gi) in enumerate(@views G.rowval[nzrange(G, idx[ii])])
+            xbuffer[j, ii] = x[Gi]
+            zbuffer[j, ii] = z[Gi]
+            Ubuffer[j, ii] = U[Gi]
+            d0buffer[j, ii] = dist0[Gi]
+        end
+    end
+
+    # Threads.@threads 
+    for ii in eachindex(idx)
+        
+            # cache coordinates, velocity and distance of frontier node
+            di = dist0[ii]
+
+            # iterate over adjacent nodes to find the the one with 
+            # the mininum distance to current node
+            for j in 1:degrees[ii]
+                # temptative distance (ignore if it's ∞)
+                δ = ifelse(
+                    d0buffer[j, ii] == typemax(T),
+                    typemax(T),
+                    d0buffer[j, ii] + 2*distance(xx[ii], zz[ii], xbuffer[j, ii], zbuffer[j, ii])/abs(UU[ii]+Ubuffer[j, ii])
+                )
+
+                # update distance and predecessor index 
+                # if it's smaller than the temptative distance
+                if di > δ
+                    di = δ
+                    p[idx[ii]] = j
+                end
+            end
+
+            # update distance
+            dist[ii] = di 
+    end
+end
+
+function _relax_bfm!(dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::BitVector, x, z, U) where T
     # iterate over queue. Unfortunately @threads can't iterate 
     # over a Set, so we need to collect() it. This yields an 
     # allocation, but it's worth it in this case as it saves 
@@ -133,31 +193,31 @@ fillfalse!(A) = fill!(A, false)
     # of branching
     Threads.@threads for i in findall(Q)
         
-        if Q[i]
+        @inbounds if Q[i]
             # cache coordinates, velocity and distance of frontier node
             # @inbounds xi, zi, Ui, di = x[i], z[i], U[i], dist0[i]
-            @inbounds di = dist0[i]
+            di = dist0[i]
 
             # iterate over adjacent nodes to find the the one with 
             # the mininum distance to current node
             for Gi in @views G.rowval[nzrange(G, i)]
                 # temptative distance (ignore if it's ∞)
                 δ = ifelse(
-                   dist0[Gi] == typemax(T),
-                   typemax(T),
-                   dist0[Gi] + 2*distance(x[i], z[i], x[Gi], z[Gi])/abs(U[i]+U[Gi])
+                    dist0[Gi] == typemax(T),
+                    typemax(T),
+                    dist0[Gi] + 2*distance(x[i], z[i], x[Gi], z[Gi])/abs(U[i]+U[Gi])
                 )
 
                 # update distance and predecessor index 
                 # if it's smaller than the temptative distance
                 if di > δ
                     di = δ
-                    @inbounds p[i] = Gi
+                    p[i] = Gi
                 end
             end
 
             # update distance
-            @inbounds dist[i] = di 
+            dist[i] = di 
         end
     end
 end
@@ -200,7 +260,7 @@ end
 end
 
 function _relax_bfm!(dist::Vector{T}, p::Vector, dist0, G, Q::Set, x, z, U) where T
-    # iterate over quere. Unfortunately @threads can't iterate 
+    # iterate over queue. Unfortunately @threads can't iterate 
     # over a Set, so we need to collect() it. This yields an 
     # allocation, but it's worth it in this case as it saves 
     # a decent number of empty iterations and removes a layer
@@ -233,19 +293,14 @@ function _relax_bfm!(dist::Vector{T}, p::Vector, dist0, G, Q::Set, x, z, U) wher
     end
 end
 
+
 function _update_bfm!(Q::Set, G, dist, dist0)
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes
-    # lk = ReentrantLock()
-    # Threads.@threads 
     for i in 1:length(G)
         @inbounds if dist[i] < dist0[i]
-            # need to use lock to define atomic
-            # region to avoid race condition
-            # lock(lk) 
             union!(Q, G[i])
-            # unlock(lk)
         end
     end
 end
@@ -268,7 +323,7 @@ function _update_bfm!(Q::BitVector, G::SparseMatrixCSC, dist, dist0)
     # than the previous one, add to adjecent 
     # to the queue nodes
     Threads.@threads for i in eachindex(Q)
-        @inbounds if dist[i] < dist0[i]
+        if dist[i] < dist0[i]
             for Gi in @views G.rowval[nzrange(G, i)]
                 Q[Gi] = true
             end
