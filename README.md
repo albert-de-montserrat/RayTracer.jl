@@ -1,5 +1,5 @@
 # RayTracer.jl
-## Current dependcies 
+## Current dependencies 
 
 1. SparseArrays
 2. Interpolations
