@@ -1,11 +1,11 @@
 # RayTracer.jl
 ## Current dependencies 
 
-1. SparseArrays
+1. SparseArrays (likely to be deprecated)
 2. Interpolations
 3. CUDA (experimental)
 4. DelimitedFiles
-5. to generate output: CSV, DataFrames, MAT (MATLAB output format shall be dropped for release version)
+5. to generate output: CSV, DataFrames, MAT (MATLAB output format shall be deprecated for release version)
 
 ## TODO list
 - [ ] API
