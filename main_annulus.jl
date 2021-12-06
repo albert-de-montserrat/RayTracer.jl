@@ -1,131 +1,86 @@
-using StaticArrays
-using SparseArrays
-using Polyester
-using CUDA
-using DelimitedFiles
-using Interpolations
-using CSV
-using DataFrames
-# using GLMakie
-
-include("src/GridAnnulus.jl")
-include("src/SSSP/dijkstra.jl")
-include("src/SSSP/bfm.jl")
-include("src/SSSP/bfm_gpu.jl")
- 
-function travel_times(D, gr, receivers; isave = false, flname = "")
-    travel_time = zeros(length(receivers))
-    for (i, receiver) in enumerate(receivers)
-        travel_time[i] = D.dist[receiver]
-    end
-
-    if isave
-        # writedlm(flname, hcat( rad2deg.(gr.θ[receivers.+1]), travel_time))
-        θ = rad2deg.(gr.θ[receivers])
-        df = DataFrame(degree=θ, travel_time = travel_time)
-        CSV.write(flname,df)
-    end
-
-end
-
-struct VelProfile{T}
-    r::T
-    Vp::T
-    Vs::T
-end
-
-function velocity_profile()
-    fl = Float32.(readdlm("VelocityProfiles/R_Vp_Vs_AK135.txt"))
-    depth = fl[:,1]
-    # convert depth -> radius
-    r = maximum(depth) .- depth
-    # bundle everything together
-    return VelProfile(reverse(r), reverse(fl[:,2]), reverse(fl[:,3]))
-end
-
-const R = 6371f0
+include("src/ShortestPath.jl")
 
 # define earths boundary (this is just for plotting)
-
 Nsurf = 360 # number of points
 xs, zs = circle(Nsurf, R, pop_end = false)
 
 # number of elements in the azimuthal and radial direction
-nθ, nr = 90, 20 
+nθ, nr = 180, 30
+nθ, nr = 180, 60
 # Instantiate grid
-gr, G, Gsp = init_annulus(nθ, nr)
+gr, G = init_annulus(nθ, nr, spacing = 40, star_levels = 2)
+Gsp = graph2sparse(G)
 
 # find source
-source_θ = 0f0
+source_θ = 0.0
 source_r = R
 source = closest_point(gr, source_θ, source_r; system = :polar)
 
 # Load Vp-Vs Earths Profile
 profile = velocity_profile()
+# for ploting
+layers = layers2plot()
 # make velocity interpolant
-interpolant_vp = LinearInterpolation(profile.r, profile.Vp)
-interpolant_vs = LinearInterpolation(profile.r, profile.Vs)
+interpolant = LinearInterpolation(profile.r, profile.Vp)
 # Vp and Vs profiles interpolated onto the grid
-Vp = [interpolant_vp(gr.r[i]) for i in 1:gr.nnods]
-Vs = [interpolant_vs(gr.r[i]) for i in 1:gr.nnods] 
+# Vp = [interpolant_vp(gr.r[i]) for i in 1:gr.nnods]
+Vp = interpolate_velocity(round.(gr.r, digits=2), interpolant, buffer = 0)
+Vp = dual_velocity(round.(gr.r, digits=2), interpolant, buffer = 1)
+# interpolate!(Vp, gr)
 
 # Find Shortest path
-@time D_vp = dijkstra(G, source, gr, Vp);
-# @time D_vp = bfm(Gsp, source, gr, Vp);
-# @time D_vp = bfm_gpu(Gsp, source, gr, Vp);
+@time D1 = bfm(Gsp, source, gr, Vp);
 
-# save travel times
-receivers = [closest_point(gr, deg2rad(deg), R; system = :polar) for deg in 0f0:360f0]
-degs = Int(360 ÷ nθ)
-travel_times(D_vp, gr, receivers; isave = false, flname = "vp_$(degs)degs_$(nr)rad.csv")
+partition = partition_grid(gr)
+@time D1 = bfm_multiphase(Gsp, source, gr, Vp, partition, interpolant)
 
-# find multiple receiver paths paths 
-receivers_θ = 10f0:5f0:150f0
+# @time D_vp2 = bfm_gpu(Gsp, source, gr, Vp);
+# @time D_vp = Dijkstra(G, source, gr, Vp);
+
+# find multiple receiver paths paths
+receivers_θ = 10f0:10f0:150f0
+receivers_θ = vcat(receivers_θ, reverse(360 .-receivers_θ) )
 receivers_r = R
 receivers = [closest_point(gr, deg2rad(deg), receivers_r; system = :polar) for deg in receivers_θ]
-p_vp1 = [recontruct_path(D_vp.prev, source, r) for r in receivers]
-
-# Coordinates of a single ray path
-# vp_x, vp_z = gr.x[p_vp1], gr.z[p_vp1]
-
-# # Plot
-# f, ax, = lines(xs, zs, color = :black, markersize = 2)
-# scatter!(gr.x,gr.z)
-# # plot ray paths
-# lines!(ax, vp_x, vp_z, color=:red, linewidth=3)
-# # lines!(ax, vs_x, vs_z, color=:green, linewidth=3)
-# # plot source and receivers
-# scatter!(ax, [gr.x[source]], [gr.z[source]],  markersize= 15, color = :magenta, marker='■', label = "source")
-# scatter!(ax, [gr.x[receiver]], [gr.z[receiver]],  markersize= 15, color = :magenta, marker='▴', label = "receiver")
-# # remove grid from plot
-# hidedecorations!(ax, ticklabels = false, ticks = false)
-# # twitch aspect ratio
-# ax.aspect = DataAspect()
-# f
+paths = [recontruct_path(D1.prev, source, r) for r in receivers]
 
 # Plot
-npaths=length(p_vp1)
-x2900, z2900 = circle(N, 6371.0f0 - 2900f0, pop_end = false) 
+plot_paths(gr, paths, xs, zs, layers, source, receivers)
 
-f, ax, = lines(xs, zs, color = :black, linewidth=3)
-# plot ray paths
-for i in 1:npaths
-    lines!(ax, gr.x[p_vp1[i]], gr.z[p_vp1[i]], color=:blue, linewidth=1)
-    # lines!(ax, gr.x[p_vp2[i]], gr.z[p_vp2[i]], linewidth=3)
-    # plot source and receivers
-    scatter!(ax, [gr.x[receivers[i]]], [gr.z[receivers[i]]],  markersize= 15, color = :magenta, marker='▴', label = "receiver")
-    # scatter!(ax, [-gr.x[receivers[i]]], [gr.z[receivers[i]]],  markersize= 15, color = :magenta, marker='▴', label = "receiver")
+# save travel times
+function save_matfile(D, gr, nθ, nr, source)
+    degs = Int(360 ÷ nθ)
+    # receivers = [closest_point(gr, deg2rad(deg), R; system = :polar) for deg in 0f0:degs:359f0]
+    # paths = [recontruct_path(D.prev, source, r) for r in receivers]
+
+    # find multiple receiver paths paths 
+    receivers_θ = 10f0:2f0:150f0
+    receivers_θ = vcat(receivers_θ, reverse(360 .-receivers_θ) )
+    receivers_r = R
+    receivers = [closest_point(gr, deg2rad(deg), receivers_r; system = :polar) for deg in receivers_θ]
+    paths = [recontruct_path(D.prev, source, r) for r in receivers]
+
+    fname = "vp_$(degs)degs_$(nr)rad_20km_spacing_NewVersion"
+    
+    travel_times(D, gr, receivers; isave = true, flname = string(fname, ".csv"))
+
+    file = matopen(string(fname, ".mat"), "w")
+    write(file, "x", gr.x)
+    write(file, "z", gr.z)
+    write(file, "theta", gr.θ)
+    write(file, "r", gr.r)
+    for (i, p) in enumerate(paths)
+        write(file, "x_path$i", gr.x[p])
+        write(file, "z_path$i", gr.z[p])
+        write(file, "travel_time_path$i", D.dist[p])
+    end
+    close(file)
 end
-scatter!(ax, [gr.x[source]], [gr.z[source]],  markersize= 15, color = :magenta, marker='■', label = "source")
-lines!(ax, x2900, z2900, color=:orange, linewidth=3)
 
-# remove grid from plot
-# hidedecorations!(ax, ticklabels = false, ticks = false)
-# hidedecorations!(ax)
-# hidespines!(ax)
-# xlabel!(ax, )
-# twitch aspect ratio
-ax.aspect = DataAspect()
-ax.xticks = ([-R,0,R], ["-R","0","R"])
-ax.yticks = ([-R,0,R], ["-R","0","R"])
-f
+save_matfile(D1, gr, nθ, nr, source)
+
+# times = [D_vp.dist[r[1]] for r in receivers]
+
+# euclidean_distance = [distance(gr.x[source],gr.z[source], gr.x[p[1]], gr.z[p[1]]) for p in p_vp1]
+
+# error = times .- euclidean_distance./8
