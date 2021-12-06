@@ -1,12 +1,13 @@
-include("src/ShortestPath.jl")
 using MAT
+include("src/ShortestPath.jl")
 
 # number of elements in the azimuthal and radial direction
 nθ, nr = 180, 30
-nθ, nr = 180, 60
+nθ, nr = 250, 90
 # Instantiate grid
-gr, G = init_annulus(nθ, nr, spacing = 40, star_levels = 2)
-Gsp = graph2sparse(G)
+gr, G = init_annulus(nθ, nr, spacing = 15)
+# @time Gsp = graph2sparse(G);
+@time Ga = sparse_adjacency_list(G);
 
 # find source
 source_θ = 0.0
@@ -23,7 +24,8 @@ Vp = interpolate_velocity(round.(gr.r, digits=2), interpolant, buffer = 0)
 Vp = dual_velocity(round.(gr.r, digits=2), interpolant, buffer = 1)
 
 # Find Shortest path
-@time D1 = bfm(Gsp, source, gr, Vp);
+# @time D1 = bfm(Gsp, source, gr, Vp);
+@time D1 = bfm(Ga, source, gr, Vp);
 # @time D_vp2 = bfm_gpu(Gsp, source, gr, Vp);
 # @time D_vp = Dijkstra(G, source, gr, Vp);
 

@@ -127,14 +127,13 @@ function primary_grid(nθ, nr, r_out)
     return gr
 end
 
-function add_discontinuities(gr, spacing, dθ, dr)
+@inbounds function add_discontinuities(gr, spacing, dθ, dr)
     # add velocity boundaries
     layers = velocity_layers(gr, spacing)
     global_idx = nnods0 = length(gr.x)
     neighbours = gr.neighbours
     for l in layers
         # cartesian coordinates of the boundary
-        # θl, rl = l[1], l[2]
         θl, rl = cartesian2polar(l[1], l[2])
         for (θi, ri) in zip(θl, rl)
             # new node global index
@@ -234,225 +233,25 @@ end
 
 function init_annulus(
     nθ::Int64, nr::Int64; spacing = 20, r_out = 6371.0, r_in = 6371-5153.5,
-    star_levels = 0
     )
 
     # grid containing only primary nodes
     gr = primary_grid(nθ, nr, r_out)
     
+    # add secondary nodes between cell vertices
     gr = secondary_nodes(gr, spacing = spacing)
 
+    # add nodes at velocity boundary layers
     nnods0 = length(gr.x)
     dθ, dr = 2*π/nθ, r_out/nr 
     G, gr, nnods0 = add_discontinuities(gr, spacing, dθ, dr)
-    # expand_secondary_nodes!(G, gr, nnods0)
     cleanse_graph!(G)
 
-    # # reorder nodes
-    # degrees = nodal_degree(G)
-    # prm = symrcm(G, degrees)
-    # reorder!(gr, prm)
-    # G = nodal_incidence(gr, star_levels = 1)
-
+    # constrain adjacency list to a given layer
     constrain2layers!(G, gr)
 
     return gr, G
 end
-
-# function init_annulus(
-#     nθ::Int64, nr::Int64; spacing = 20, r_out = 6371f0, r_in = 6371f0-5153.5f0,
-#     star_levels = 0
-#     )
-     
-#     # r_out = r_out
-#     # # r_in = r_in
-#     # nn = nr*nθ # total number of nodes
-#     # nels = (nr-1)*nθ
-#     # r = fill(0.0, nn+1)
-#     # θ = fill(0.0, nn+1)
-#     # dθ = 2*π/nθ
-#     # dr = r_out/nr 
-#     # r_in = r_out - dr*(nr-1)
-
-#     # # -- Nodal positions
-#     # @inbounds for ii in 1:nθ
-#     #     idx = @. (1:nr) + nr*(ii-1)
-#     #     r[idx] .= LinRange(r_in, r_out, nr)
-#     #     θ[idx] .= dθ*(ii-1)
-#     # end
-#     # # center of the core
-#     # r[end], θ[end] = 0.0, 0.0
-
-#     # # -- Quadrilateral elements
-#     # id_el = Matrix{Int64}(undef, nels, 4)
-#     # @inbounds for ii in 1:nθ
-#     #     if ii < nθ
-#     #         idx  = @. (1:nr-1) + (nr-1)*(ii-1)
-#     #         idx1 = @. (1:nr-1) + nr*(ii-1)
-#     #         idx2 = @. (1:nr-1) + nr*(ii)
-#     #         id_el[idx,:] .= [idx1 idx2 idx2.+1 idx1.+1]
-#     #     else
-#     #         idx  = @. (1:nr-1) + (nr-1)*(ii-1)
-#     #         idx1 = @. (1:nr-1) + nr*(ii-1)
-#     #         idx2 = @. 1:nr-1
-#     #         id_el[idx,:] .= [idx1 idx2 idx2.+1 idx1.+1]
-#     #     end
-#     # end
-
-#     # # -- Triangular elements
-#     # id_triangle = Matrix{Int64}(undef, nθ, 3)
-#     # @inbounds for ii in 1:nθ
-#     #     idx = 1 + nr*(ii-1)
-#     #     id_triangle[ii, 1] = nn+1
-#     #     id_triangle[ii, 2] = idx
-#     #     id_triangle[ii, 3] = idx + nr
-#     # end
-#     # id_triangle[end] = 1
-
-#     # # -- connectivity and element type
-#     # element_type = Dict{Int, Symbol}()
-#     # connectivity = Dict{Int, Vector{Int64}}()
-#     # @inbounds for ii in 1:nels # rectangular elements
-#     #     connectivity[ii] = id_el[ii,:]
-#     #     element_type[ii] = :Quad
-#     # end
-#     # @inbounds for (i, ii) in enumerate(1+nels:nθ+nels) # triangular elements
-#     #     connectivity[ii] = id_triangle[i,:]
-#     #     element_type[ii] = :Tri
-#     # end
-
-#     # neighbours = element_neighbours(connectivity)
-#     # nel = length(connectivity)
-#     # x, z = @cartesian(θ, r)
-
-#     # gr = Grid2D(x,
-#     #     z,
-#     #     θ,
-#     #     r,
-#     #     connectivity,
-#     #     nθ,
-#     #     nr,
-#     #     nel,
-#     #     length(x),
-#     #     neighbours,
-#     #     element_type
-#     # )
-    
-#     # # grid containing only primary nodes
-#     # gr = primary_grid(nθ, nr, r_out)
-    
-#     # G0 = nodal_incidence(gr, star_levels = 1)
-
-#     # # degrees = nodal_degree(G0)
-#     # # prm = symrcm(G0, degrees)
-#     # # reorder!( gr, prm)
-
-#     # # G0 = nodal_incidence(gr, star_levels = 1)
-
-#     # gr = secondary_nodes(gr, spacing = spacing)
-
-#     # G02 = deepcopy(G)
-
-#     # degrees = nodal_degree(G)
-#     # prm = symrcm(G, degrees)
-#     # reorder!( gr, prm)
-
-#     # G = nodal_incidence(gr, star_levels = 1)
-    
-#     # # add velocity boundaries
-#     # layers = velocity_layers(gr, spacing)
-#     # global_idx = nnods0 = length(gr.x)
-#     # for l in layers
-#     #     # cartesian coordinates of the boundary
-#     #     # θl, rl = l[1], l[2]
-#     #     θl, rl = cartesian2polar(l[1], l[2])
-#     #     for (θi, ri) in zip(θl, rl)
-#     #         # new node global index
-#     #         global_idx += 1
-#     #         # find element where new node belongs
-#     #         θreps = Int(fld(θi, dθ))
-#     #         rreps = Int(cld(ri, dr))
-#     #         iel = (nr-1)*θreps + rreps - 1
-#     #         # add to connectivity matrix
-#     #         push!(gr.e2n[iel], global_idx)
-#     #         # add  to elements on both sides
-#     #         if θi == 0
-#     #             θreps = Int(fld(2π, dθ))
-#     #             push!(gr.e2n[(nr-1)*θreps + rreps - 1], global_idx)
-#     #         end
-#     #     end
-#     # end
-
-#     # # concatenate nodes of velocity boundaries
-#     # lθ = [cartesian2polar(l[1], l[2]) for l in layers]
-#     # θboundary = reduce(vcat, l[1] for l in lθ)
-#     # rboundary = reduce(vcat, l[2] for l in lθ)
-#     # # convert to polar coordinates
-#     # xboundary, zboundary = polar2cartesian(θboundary, rboundary)
-
-#     # gr = Grid2D(
-#     #     vcat(gr.x, xboundary),
-#     #     vcat(gr.z, zboundary),
-#     #     vcat(gr.θ, θboundary),
-#     #     vcat(gr.r, rboundary),
-#     #     gr.e2n,
-#     #     nθ,
-#     #     nr,
-#     #     nel,
-#     #     gr.nnods + length(xboundary),
-#     #     gr.neighbours,
-#     #     gr.element_type
-#     # )
-
-#     # G = nodal_incidence(gr, star_levels = 1)
-
-#     # constrain2layers!(G, gr)
-
-#     # grid containing only primary nodes
-#     gr = primary_grid(nθ, nr, r_out)
-    
-#     # degrees = nodal_degree(G0)
-#     # prm = symrcm(G0, degrees)
-#     # reorder!( gr, prm)
-#     # G0 = nodal_incidence(gr, star_levels = 1)
-
-#     gr = secondary_nodes(gr, spacing = spacing)
-
-#     nnods0 = length(gr.x)
-#     dθ, dr = 2*π/nθ, r_out/nr 
-#     G, gr, nnods0 = add_discontinuities(gr, spacing, dθ, dr)
-#     # expand_secondary_nodes!(G, gr, nnods0)
-
-#     # expand adjency of boundary nodes
-#     # for _ in 1:2
-#     #     G02 = deepcopy(G)
-#     #     for i in (nnods0+1):gr.nnods
-#     #         for idx in G02[i]
-#     #             union!(G[i], G02[idx])
-#     #         end
-#     #     end
-#     #     constrain2layers!(G, gr)
-#     # end
-
-#     # if star_levels > 0 
-#     #     add_star_levels!(G, G0, star_levels)
-#     # end
-
-#     cleanse_graph!(G)
-
-#     # # reorder nodes
-#     # degrees = nodal_degree(G)
-#     # prm = symrcm(G, degrees)
-#     # reorder!(gr, prm)
-#     # G = nodal_incidence(gr, star_levels = 1)
-
-#     constrain2layers!(G, gr)
-
-#     # make sparse array
-#     # Gsp = graph2sparse(G)
-
-#     return gr, G
-# end
 
 function add_star_levels!(G, G0, star_levels)
     # G0 = deepcopy(G)

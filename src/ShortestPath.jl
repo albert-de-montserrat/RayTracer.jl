@@ -15,7 +15,7 @@
 # export distance
 
 using SparseArrays
-using Polyester
+# using Polyester
 using CUDA
 using DelimitedFiles
 using Interpolations

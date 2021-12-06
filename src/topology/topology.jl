@@ -1,6 +1,6 @@
-struct AdjencyMatrix{T}
+struct AdjencyList{T}
     G::Matrix{T}
-    N::Vector{T}
+    N::Vector{T} # nodal degree
 end
 
 function adjacency_matrix(gr::Grid2D, nθ, npoints)
@@ -25,17 +25,10 @@ function adjacency_matrix(gr::Grid2D, nθ, npoints)
         end
     end
 
-    adjmtrx = AdjencyMatrix(G, N)
+    adjmtrx = AdjencyList(G, N)
 
     return adjmtrx
 
-    # # make dictionary
-    # G = Dict{Int, Set{Int}}()
-    # for i in 1:gr.nnod
-    #     @inbounds G[i] = Set(@views G[1:N[i], i])
-    # end
-    
-    # return G
 end
 
 function adjacency_matrix!(adjmtrx, gr::Grid2D)
@@ -56,6 +49,53 @@ function adjacency_matrix!(adjmtrx, gr::Grid2D)
             end
         end
     end
+
+end
+
+function adjacency_list(G::Dict)
+    # find max. nodal degree
+    deg = Int32.(nodal_degree(G))
+    maxdeg = maximum(deg)
+    # number of nodes
+    nnods = length(G)
+    # Allocate matrix
+    adj_list = zeros(Int32, maxdeg, nnods) # 24 = max num of neighbours
+
+    @inbounds for (j, Q) in G
+        for (i, Qi) in enumerate(Q)
+            adj_list[i, j] = Qi
+        end
+    end
+    
+    return AdjencyList(adj_list, deg)
+
+end
+
+struct SparseAdjencyList{T}
+    list::Vector{T}
+    deg::Vector{T}
+    idx::Vector{T}
+end
+
+function sparse_adjacency_list(G::Dict)
+    # find max. nodal degree
+    deg = Int32.(nodal_degree(G))
+    cumdeg = Int32.(vcat(0, cumsum(deg)))
+    # number of nodes
+    nnods = length(G)
+    # Allocate matrix
+    adj_vector = Vector{Int32}(undef, sum(deg) )
+    idx0 = @. Int32(1)+cumdeg
+
+    Threads.@threads for inode in 1:nnods
+        # i0 = cumdeg[inode] + 1
+        @inbounds for (i, Gi) in enumerate(G[inode])
+            adj_vector[cumdeg[inode] + i] = Gi
+            # i0 += 1
+        end
+    end
+        
+    return SparseAdjencyList(adj_vector, deg, idx0)
 
 end
 
@@ -130,3 +170,40 @@ function partition_grid(gr)
     return GridPartition(LayerID, rlayer)
 
 end
+
+
+# function readtest(G::Dict)
+#     a = zeros(length(G))
+#     for (i, Q) in G
+#         for Qi in Q
+#             a[i] = Qi
+#         end
+#     end
+# end
+
+# function readtest(List::AdjencyList)
+#     G = List.G
+#     N = List.N
+#     a = zeros(length(G))
+#     # tmp = zeros(size(G, 1))
+
+#     for j in axes(G, 2)
+#         for i in 1:N[j]
+#             a[i] = G[i, j]
+#         end
+#     end
+# end
+
+# function readtest(Gsp::SparseMatrixCSC)
+#     n = size(Gsp, 2)
+#     a = zeros(n)
+#     for j in 1:n
+#         for Gi in @views Gsp.rowval[nzrange(Gsp, j)]
+#             a[i] = Gi
+#         end
+#     end
+# end
+
+# @benchmark readtest($G)
+# @benchmark readtest($A)
+# @benchmark readtest($Gsp)
