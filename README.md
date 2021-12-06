@@ -7,6 +7,12 @@
 4. DelimitedFiles
 5. to generate output: CSV, DataFrames, MAT (MATLAB output format shall be dropped for releaseversion)
 
+## TODO list
+- [ ] API
+- [x] Optimize sparse graph
+- [ ] Optimize addition of secondary nodes (for now it crashed for azimuthal spacing less than 15km)
+- [ ] Wrapper for 3D mesh
+
 ## Example 2D annulus
 ```julia
 include("src/ShortestPath.jl")
