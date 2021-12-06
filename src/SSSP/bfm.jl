@@ -67,8 +67,82 @@ function bfm(G::Dict{M, Set{M}}, source::Int, gr, U::Vector{T}) where {M,T}
     return BellmanFordMoore(p, dist)
 end
 
-function bfm(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where T
+# specialized implementation for on-the-fly weights
+function bfm(G::Dict{M, Set{M}}, source::Int, gr, U::Matrix{T}) where {M,T}
 
+    # unpack coordinates
+    x, z, r = gr.x, gr.z, gr.r
+
+    # number of nodes in the graph
+    n = length(G) 
+
+    # allocate dictionary containing best previous nodes
+    # p = Dict{M, M}()
+    p = Vector{M}(undef, n)
+
+    # # priority queue containing NOT settled nodes
+    # Q = Set{M}() 
+    # # 1st frontier nodes are nodes adjacent to the source
+    # union!(Q, G[source])
+
+    # priority queue containing NOT settled nodes
+    Q = falses(n)
+    # 1st frontier nodes are nodes adjacent to the source
+    for Gi in G[source]
+        Q[Gi] = true
+    end
+
+    # initialise all distances as infinity and zero at the source node 
+    dist = fill(typemax(T), n) 
+    dist[source] = zero(T)
+    dist0 = deepcopy(dist)
+
+    # main lopp
+    it = 1
+    # covergence: if the queue is empty we are done
+    @inbounds while sum(Q) != 0
+        
+        # relax edges (parallel process)
+        _relax_bfm!(dist, p, dist0, G, Q, x, z, r, U)
+            
+        # pop queue (serial-but-fast process)
+        # empty!(Q)
+        fillfalse!(Q)
+
+        # update nodal queue (parallel process)
+        _update_bfm!(Q, G, dist, dist0)
+
+        # update old distance vector (TODO parallel version)
+        copyto!(dist0, dist)
+
+        # update iteration counter
+        it+=1
+    end
+
+    println("Converged in $it iterations")
+
+    return BellmanFordMoore(p, dist)
+end
+
+function bfm2(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}, partition, interpolant) where T
+
+    # unpack partition
+    ID = partition.id
+    rboundaries = partition.rboundaries
+    nlayers = partition.nlayers
+    nboundaries = partition.nboundaries
+    layers = partition.layers
+    boundaries = partition.boundaries
+    iterator = partition.iterator
+ 
+    boundary_dict = Dict(a => b for (a,b) in zip( partition.boundaries,  partition.rboundaries))
+
+    # find ids of boundary nodes
+    boundary_nodes =  reduce(
+        vcat,
+        [findall(round.(gr.r, digits=2) .== b) for b in partition.rboundaries]
+    )
+    
     # unpack coordinates
     x, z = gr.x, gr.z
 
@@ -76,13 +150,7 @@ function bfm(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where T
     n = length(x)
 
     # allocate dictionary containing best previous nodes
-    # p = Dict{M, M}()
     p = Vector{Int}(undef, n)
-
-    # # priority queue containing NOT settled nodes
-    # Q = Set{M}() 
-    # # 1st frontier nodes are nodes adjacent to the source
-    # union!(Q, G[source])
 
     # priority queue containing NOT settled nodes
     Q = falses(n)
@@ -104,8 +172,122 @@ function bfm(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where T
         # relax edges (parallel process)
         _relax_bfm!(dist, p, dist0, Gsp, Q, x, z, U)
             
-        # pop queue (serial-but-fast process)
-        # empty!(Q)
+        # pop queue 
+        fillfalse!(Q)
+
+        # update nodal queue (parallel process)
+        _update_bfm!(Q, Gsp, dist, dist0)
+
+        # Threads.@threads for i in eachindex(Q)
+        #     if dist[i] < dist0[i]
+        #         for Gi in @views G.rowval[nzrange(G, i)]
+        #             Q[Gi] = true
+        #         end
+        #     end
+        # end
+
+        # update old distance vector (TODO parallel version)
+        copyto!(dist0, dist)
+
+        for idx in boundary_nodes
+            if Q[idx] == true
+                U[idx] = interpolant(gr.r[idx] + 1)
+            else
+                # if (dist[idx] != typemax(T)) 
+                U[idx] = interpolant(gr.r[idx] - 1)
+            end
+        end
+
+        # update iteration counter
+        it+=1
+    end
+
+    println("Converged in $it iterations")
+
+    return BellmanFordMoore(p, dist)
+end
+
+function bfm(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where T
+
+    # unpack coordinates
+    x, z = gr.x, gr.z
+
+    # number of nodes in the graph
+    n = length(x)
+
+    # allocate dictionary containing best previous nodes
+    p = fill(source, n)
+
+    # priority queue containing NOT settled nodes
+    Q = falses(n)
+    # 1st frontier nodes are nodes adjacent to the source
+    @inbounds for Gi in @views Gsp.rowval[nzrange(Gsp, source)]
+        Q[Gi] = true
+    end
+
+    # initialise all distances as infinity and zero at the source node 
+    dist = fill(typemax(T), n) 
+    dist[source] = zero(T)
+    dist0 = deepcopy(dist)
+
+    # main loop
+    it = 1
+    # covergence: if the queue is empty we are done
+    while sum(Q) != 0
+        
+        # relax edges (parallel process)
+        _relax_bfm!(dist, p, dist0, Gsp, Q, x, z, U)
+            
+        # pop queue 
+        fillfalse!(Q)
+
+        # update nodal queue (parallel process)
+        _update_bfm!(Q, Gsp, dist, dist0)
+
+        # update old distance vector (TODO parallel version)
+        copyto!(dist0, dist)
+
+        # update iteration counter
+        it+=1
+    end
+
+    println("Converged in $it iterations")
+
+    return BellmanFordMoore(p, dist)
+end
+
+function bfm(Gsp::SparseMatrixCSC, source::Int, gr, U::Matrix{T}) where T
+
+    # unpack coordinates
+    x, z, r = gr.x, gr.z, gr.r
+
+    # number of nodes in the graph
+    n = length(x)
+
+    # allocate dictionary containing best previous nodes
+    p = fill(source, n)
+
+    # priority queue containing NOT settled nodes
+    Q = falses(n)
+    # 1st frontier nodes are nodes adjacent to the source
+    @inbounds for Gi in @views Gsp.rowval[nzrange(Gsp, source)]
+        Q[Gi] = true
+    end
+
+    # initialise all distances as infinity and zero at the source node 
+    dist = fill(typemax(T), n) 
+    dist[source] = zero(T)
+    dist0 = deepcopy(dist)
+
+    # main loop
+    it = 1
+    # covergence: if the queue is empty we are done
+    while sum(Q) != 0
+        
+        # relax edges (parallel process)
+        _relax_bfm!(dist, p, dist0, Gsp, Q, x, z, r, U)
+            
+        # pop queue 
         fillfalse!(Q)
 
         # update nodal queue (parallel process)
@@ -193,9 +375,8 @@ function _relax_bfm!(dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::B
     # of branching
     Threads.@threads for i in findall(Q)
         
-        @inbounds if Q[i]
+        # @inbounds if Q[i]
             # cache coordinates, velocity and distance of frontier node
-            # @inbounds xi, zi, Ui, di = x[i], z[i], U[i], dist0[i]
             di = dist0[i]
 
             # iterate over adjacent nodes to find the the one with 
@@ -205,7 +386,7 @@ function _relax_bfm!(dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::B
                 δ = ifelse(
                     dist0[Gi] == typemax(T),
                     typemax(T),
-                    dist0[Gi] + 2*distance(x[i], z[i], x[Gi], z[Gi])/abs(U[i]+U[Gi])
+                    dist0[Gi] + 2*distance(x[i], z[i], x[Gi], z[Gi])/(U[i]+U[Gi])
                 )
 
                 # update distance and predecessor index 
@@ -218,9 +399,146 @@ function _relax_bfm!(dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::B
 
             # update distance
             dist[i] = di 
-        end
+        # end
     end
 end
+
+@inline function relax_bfm!(dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::BitVector, x, z, r, U::Matrix) where T
+    # iterate over queue. Unfortunately @threads can't iterate 
+    # over a Set, so we need to collect() it. This yields an 
+    # allocation, but it's worth it in this case as it saves 
+    # a decent number of empty iterations and removes a layer
+    # of branching
+    # Threads.@threads 
+    for i in findall(Q)
+        
+        # @inbounds if Q[i]
+            # cache coordinates, velocity and distance of frontier node
+            di = dist0[i]
+
+            # iterate over adjacent nodes to find the the one with 
+            # the mininum distance to current node
+            for Gi in @views G.rowval[nzrange(G, i)]
+                dGi = dist0[Gi]                
+                # i is the index of the ray-tail, Gi index of ray-head
+                # branch-free arithmetic to check whether ray is coming from above or below
+                # idx = 1 if ray is going downards, = 2 if going upwards
+                head_idx = (r[i] > r[Gi]) + 1
+                tail_idx = (head_idx==1) + 1
+                # temptative distance (ignore if it's ∞)
+                δ = ifelse(
+                    dGi == typemax(T),
+                    typemax(T),
+                    dGi + 2*distance(x[i], z[i], x[Gi], z[Gi])/(U[i, tail_idx]+U[Gi, head_idx])
+                )
+
+                # update distance and predecessor index 
+                # if it's smaller than the temptative distance
+                if dist0[i] > δ
+                    dist0[i] = δ
+                    p[i] = Gi
+                end
+            end
+
+            # update distance
+            dist[i] = di 
+        # end
+    end
+end
+
+@noinline function _relax_bfm!(p::Vector, dist, dist0, G::SparseMatrixCSC, i, x, z, r, U::Matrix{T}) where T
+   
+    # cache coordinates, velocity and distance of frontier node
+    di = dist0[i]
+    xi, zi, ri = x[i], z[i], r[i]
+    Ui = (U[i, 1], U[i, 2])
+
+    # # UGi = @SMatrix [U[Gi, :] for Gi in @views G.rowval[nzrange(G, i)]]
+    # idx = @views G.rowval[nzrange(G, i)]
+    # xGi = @views x[idx]
+    # zGi = @views z[idx]
+    # rGi = @views r[idx]
+    # dGi = @views dist0[idx]
+    # UGi = @views U[idx, :]
+
+    # @inbounds for i in eachindex(idx)
+    #     # i is the index of the ray-tail, Gi index of ray-head
+    #     # branch-free arithmetic to check whether ray is coming from above or below
+    #     # idx = 1 if ray is going downards, = 2 if going upwards
+    #     head_idx = (ri > rGi[i]) + 1
+    #     tail_idx = (head_idx==1) + 1
+    #     # temptative distance (ignore if it's ∞)
+    #     δ = ifelse(
+    #         dGi[i] == typemax(T),
+    #         typemax(T),
+    #         dGi[i] + 2*distance(xi, zi, xGi[i], zGi[i])/(Ui[tail_idx]+UGi[i, head_idx])
+    #     )
+
+    #     # update distance and predecessor index 
+    #     # if it's smaller than the temptative distance
+    #     if di > δ
+    #         di = δ
+    #         p[i] = Gi
+    #     end
+    # end
+
+    # iterate over adjacent nodes to find the the one with 
+    # the mininum distance to current node
+    @inbounds for Gi in @views G.rowval[nzrange(G, i)]
+        dGi = dist0[Gi]                
+        # i is the index of the ray-tail, Gi index of ray-head
+        # branch-free arithmetic to check whether ray is coming from above or below
+        # idx = 1 if ray is going downards, = 2 if going upwards
+        head_idx = (ri > r[Gi]) + 1
+        tail_idx = (head_idx==1) + 1
+        # temptative distance (ignore if it's ∞)
+        δ = ifelse(
+            dGi == typemax,
+            typemax(T),
+            # dGi + 2*distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx])
+            muladd(2, distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx]), dGi)
+        )
+
+        # update distance and predecessor index 
+        # if it's smaller than the temptative distance
+        if di > δ
+            di = δ
+            p[i] = Gi
+        end
+    end
+
+    # # update distance
+    # dist[i] = di 
+end
+
+@btime _relax_bfm!($p, $dist, $dist0, $Gsp, $120, $x, $z, $r, $Vp);
+@code_warntype _relax_bfm!(p, dist, dist0, Gsp, 120, x, z, r, Vp);
+
+@btime _relax_bfm!($dist, $p, $dist0, $Gsp, $Q, $x, $z, $r,$Vp)
+
+
+# struct Queue{T, I}
+#     indices::T
+#     n::I
+# end
+
+# @inline function indices_Q(idxQ, Q)
+#     # c = count(Q)
+#     n = 0
+#     it = 0
+#     i1 = findfirst(Q)
+#     i2 = findlast(Q)
+#     for it in i1:i2
+#         @inbounds if Q[it]
+#             n += 1 
+#             idxQ[n] = it
+#         end
+#         # n == c && break
+#     end
+#     return idxQ, n
+# end
+
+# @code_warntype_relax_bfm!(dist, p, dist0, Gsp, Q, x, z, r,Vp)
 
 @inbounds function _relax_bfm!(dist::Vector{T}, p::Vector, dist0, G, Q::BitVector, x, z, U) where T
     # iterate over queue. Unfortunately @threads can't iterate 
@@ -277,7 +595,7 @@ function _relax_bfm!(dist::Vector{T}, p::Vector, dist0, G, Q::Set, x, z, U) wher
             δ = ifelse(
                 dist0[Gi] == typemax(T),
                 typemax(T),
-                dist0[Gi] + 2*distance(xi, zi, x[Gi], z[Gi])/abs(U[i]+Ui)
+                dist0[Gi] + 2*distance(xi, zi, x[Gi], z[Gi])/(U[i]+Ui)
             )
 
             # update distance and predecessor index 

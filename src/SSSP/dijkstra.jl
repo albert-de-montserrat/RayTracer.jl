@@ -187,27 +187,26 @@ function recontruct_path(D, source, receiver)
     prev = D.prev
     path = Int[receiver]
     ipath = prev[receiver]
-    while ipath != source
+    while ipath ∉ path
+        # while ipath != source
         push!(path, ipath)
-        if !haskey(prev, ipath)
-            break
-        end
-        ipath = prev[ipath]
+        # if !haskey(prev, ipath)
+        #     break
+        # end
+        @show ipath = prev[ipath]
     end
     push!(path, source)
 
     return path
 end
 
-function recontruct_path(prev::Vector, source, receiver)
+@inbounds function recontruct_path(prev::Vector, source, receiver)
     path = Int[receiver]
     ipath = prev[receiver]
     while ipath != source
         push!(path, ipath)
-        # if !haskey(prev, ipath)
-        #     break
-        # end
         ipath = prev[ipath]
+        # @show ipath
     end
     push!(path, source)
 

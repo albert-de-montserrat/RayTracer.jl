@@ -19,31 +19,9 @@ end
 
 # specialized implementation for on-the-fly weights
 function bfm_gpu(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where {M,T}
-
+   
     # move arrays to GPU
-    graph_d, mesh_d = move2device(Gsp, U, gr)
-
-    # number of nodes in the graph
-    n = length(U)
-
-    # allocate dictionary containing best previous nodes
-    # p = Dict{M, M}()
-    p = CUDA.zeros(Int32, n)
-
-    # priority queue containing NOT settled nodes
-    Q = CUDA.fill(false,n)
-    # 1st frontier: nodes adjacent to the source
-    isource = Gsp.rowval[nzrange(Gsp, source)]
-    Q[isource] .= true
-
-    # initialise all distances as infinity and zero at the source node 
-    tmp = fill(typemax(T), n)
-    tmp[source] = zero(T)
-    dist = CuArray(tmp)
-    tmp = nothing
-    # dist = CUDA.fill(typemax(T), n)
-    # dist[source] = zero(T)
-    dist0 = deepcopy(dist)
+    graph_d, mesh_d, Q, dist, dist0, p = move2device(Gsp, U, gr, source)
 
     # main loop
     it = 1
@@ -57,7 +35,6 @@ function bfm_gpu(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where {M,T
 
         # update nodal queue (parallel process)
         update_bfm!(Q, dist, dist0, graph_d)
-        # @btime update_bfm!($Q, $dist, $dist0, $graph_d)
 
        # update old distance vector (TODO parallel version)
         copyto!(dist0, dist)
@@ -79,7 +56,7 @@ function _gpu_relaxation_BFM!(Q, K, p, dist, dist0, n1, n2, x, z, U)
 
     if index < length(Q)
 
-        if Q[index]
+        @inbounds if Q[index]
 
             di::Float64 = dist0[index]
             # xi::Float64, zi::Float64, Ui::Float64 = x[index], z[index], U[index]
@@ -90,13 +67,8 @@ function _gpu_relaxation_BFM!(Q, K, p, dist, dist0, n1, n2, x, z, U)
                 δ = ifelse(
                    dist0[Gi] == T,
                    T,
-                   dist0[Gi] + 2*distance(x[index], z[index], x[Gi], z[Gi])/abs(U[index]+U[Gi])
+                   dist0[Gi] + 2*distance(x[index], z[index], x[Gi], z[Gi])/(U[index]+U[Gi])
                 )
-                # δ = ifelse(
-                #    dist0[Gi] == T,
-                #    T,
-                #    dist0[Gi] + 2*distance(xi, zi, x[Gi], z[Gi])/abs(Ui+U[Gi])
-                # )
                 # update distance and predecessor index 
                 # if it's smaller than the temptative distance
                 if di > δ
@@ -128,27 +100,7 @@ function relaxation_BFM!(Q::CuArray{Bool}, dist::CuArray, dist0::CuArray, p::CuA
     end
 end
 
-# @kernel function potato!(Q, K, n1, n2, dist, dist0)
-#     index = @index(Global)
-    
-#     if index < length(Q)
-#         @inbounds if dist[index] < dist0[index]        
-#             for i in n1[index]:n2[index]
-#                 Q[K[i]] = true
-#             end
-#         end
-#     end
-
-# end
-
-# function foo!(Q, K, n1, n2, dist, dist0)
-#     kernel! = potato!(CUDADevice(), 256)
-#     event = kernel!(Q, K, n1, n2, dist, dist0, ndrange=length(Q))
-#     wait(event)
-# end
-
 function _gpu_update_bfm!(Q, K, n1, n2, dist, dist0)
-
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes
@@ -180,7 +132,7 @@ function update_bfm!(Q::CuArray{Bool}, dist::CuArray, dist0::CuArray, graph_d::C
     end
 end
 
-function move2device(K, U, gr)
+function move2device(K, U, gr, source)
 
     # move velocity field to device
     U_d = CuArray(Float32.(U))
@@ -207,13 +159,25 @@ function move2device(K, U, gr)
     graph_d = CuGraph(K_d, n1_d, n2_d)
     mesh_d = CuMesh2D(x_d, z_d, U_d)
 
-    return graph_d, mesh_d
+    # number of nodes in the graph
+    n = length(U)
+
+    # allocate dictionary containing best previous nodes
+    p = CUDA.zeros(Int32, n)
+ 
+    # priority queue containing NOT settled nodes
+    Q = CUDA.fill(false,n)
+
+    # 1st frontier: nodes adjacent to the source
+    isource = K.rowval[nzrange(K, source)]
+    Q[isource] .= true
+ 
+    # initialise all distances as infinity and zero at the source node 
+    tmp = fill(Inf, n)
+    tmp[source] = 0 
+    dist = CuArray{Float32}(tmp)
+    dist0 = deepcopy(dist)
+
+    return graph_d, mesh_d, Q, dist, dist0, p
 
 end
-
-# macro device(A::Union{Expr, Symbol})
-#     T = eltype($A)
-#     T isa Float64 && T = Float32
-#     T isa Int64 && T = Int32
-#     esc(:())
-# end
