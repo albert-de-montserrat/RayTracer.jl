@@ -9,7 +9,7 @@
 
 ## TODO list
 - [ ] API
-- [x] Optimize sparse graph (mvoed from SparseArray to cystom data structured)
+- [x] Optimize sparse graph (moved from SparseArray to custom data structured + parallelized)
 - [ ] Optimize addition of secondary nodes (for now it crashes for azimuthal spacing less than 15km)
 - [ ] Wrapper for 3D mesh
 
