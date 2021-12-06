@@ -1,8 +1,5 @@
 include("src/ShortestPath.jl")
-
-# define earths boundary (this is just for plotting)
-Nsurf = 360 # number of points
-xs, zs = circle(Nsurf, R, pop_end = false)
+using MAT
 
 # number of elements in the azimuthal and radial direction
 nθ, nr = 180, 30
@@ -17,23 +14,16 @@ source_r = R
 source = closest_point(gr, source_θ, source_r; system = :polar)
 
 # Load Vp-Vs Earths Profile
-profile = velocity_profile()
-# for ploting
-layers = layers2plot()
+profile = velocity_profile() # AK135
 # make velocity interpolant
 interpolant = LinearInterpolation(profile.r, profile.Vp)
+
 # Vp and Vs profiles interpolated onto the grid
-# Vp = [interpolant_vp(gr.r[i]) for i in 1:gr.nnods]
 Vp = interpolate_velocity(round.(gr.r, digits=2), interpolant, buffer = 0)
 Vp = dual_velocity(round.(gr.r, digits=2), interpolant, buffer = 1)
-# interpolate!(Vp, gr)
 
 # Find Shortest path
 @time D1 = bfm(Gsp, source, gr, Vp);
-
-partition = partition_grid(gr)
-@time D1 = bfm_multiphase(Gsp, source, gr, Vp, partition, interpolant)
-
 # @time D_vp2 = bfm_gpu(Gsp, source, gr, Vp);
 # @time D_vp = Dijkstra(G, source, gr, Vp);
 
@@ -45,14 +35,15 @@ receivers = [closest_point(gr, deg2rad(deg), receivers_r; system = :polar) for d
 paths = [recontruct_path(D1.prev, source, r) for r in receivers]
 
 # Plot
+# define earths boundary
+Nsurf = 360 # number of points
+xs, zs = circle(Nsurf, R, pop_end = false)
+layers = layers2plot()
 plot_paths(gr, paths, xs, zs, layers, source, receivers)
 
 # save travel times
 function save_matfile(D, gr, nθ, nr, source)
     degs = Int(360 ÷ nθ)
-    # receivers = [closest_point(gr, deg2rad(deg), R; system = :polar) for deg in 0f0:degs:359f0]
-    # paths = [recontruct_path(D.prev, source, r) for r in receivers]
-
     # find multiple receiver paths paths 
     receivers_θ = 10f0:2f0:150f0
     receivers_θ = vcat(receivers_θ, reverse(360 .-receivers_θ) )
@@ -78,9 +69,3 @@ function save_matfile(D, gr, nθ, nr, source)
 end
 
 save_matfile(D1, gr, nθ, nr, source)
-
-# times = [D_vp.dist[r[1]] for r in receivers]
-
-# euclidean_distance = [distance(gr.x[source],gr.z[source], gr.x[p[1]], gr.z[p[1]]) for p in p_vp1]
-
-# error = times .- euclidean_distance./8
