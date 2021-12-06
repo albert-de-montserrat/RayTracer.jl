@@ -5,7 +5,7 @@
 2. Interpolations
 3. CUDA (experimental)
 4. DelimitedFiles
-5. to generate output: CSV, DataFrames, MAT (MATLAB output format shall be dropped for releaseversion)
+5. to generate output: CSV, DataFrames, MAT (MATLAB output format shall be dropped for release version)
 
 ## TODO list
 - [ ] API
