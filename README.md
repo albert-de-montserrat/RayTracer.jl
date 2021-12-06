@@ -10,7 +10,7 @@
 ## TODO list
 - [ ] API
 - [x] Optimize sparse graph (moved from SparseArray to custom data structured + parallelized)
-- [ ] Optimize addition of secondary nodes (for now it crashes for azimuthal spacing less than 15km)
+- [ ] Optimize addition of secondary nodes (for now it crashes for spacing < 15km)
 - [ ] Wrapper for 3D mesh
 
 ## Example 2D annulus
