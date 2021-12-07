@@ -88,10 +88,8 @@ function sparse_adjacency_list(G::Dict)
     idx0 = @. Int32(1)+cumdeg
 
     Threads.@threads for inode in 1:nnods
-        # i0 = cumdeg[inode] + 1
         @inbounds for (i, Gi) in enumerate(G[inode])
             adj_vector[cumdeg[inode] + i] = Gi
-            # i0 += 1
         end
     end
         

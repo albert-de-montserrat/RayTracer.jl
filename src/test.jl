@@ -112,3 +112,13 @@ function _update_bfm!(Q::BitVector, Ga::SparseAdjencyList, dist, dist0)
         end
     end
 end
+
+@inbounds function get_Qi(gr)
+    inode = 60
+
+    for i in  @views gr.neighbours[inode]
+        for j in gr.e2n[i]
+            Qi = j 
+        end
+    end
+end

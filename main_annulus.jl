@@ -2,10 +2,10 @@ using MAT
 include("src/ShortestPath.jl")
 
 # number of elements in the azimuthal and radial direction
-nθ, nr = 180, 30
 nθ, nr = 250, 90
+nθ, nr = 360, 360
 # Instantiate grid
-gr, G = init_annulus(nθ, nr, spacing = 15)
+gr, G = init_annulus(nθ, nr, spacing = 10)
 # @time Gsp = graph2sparse(G);
 @time Ga = sparse_adjacency_list(G);
 
