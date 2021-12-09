@@ -10,8 +10,9 @@
 ## TODO list
 - [ ] API
 - [x] Optimize sparse graph (moved from SparseArray to custom data structured + parallelized)
-- [ ] Optimize addition of secondary nodes (for now it crashes for spacing < 15km)
-- [ ] Look for vectorization opportunities
+- [ ] PRIORITY: Optimize generation of adjacency list (now it crashes for spacing < 15km)
+- [ ] Look for vectorization opportunities ??
+- [ ] Re-write Cuthill-McKee algorithm (node re-ordering)
 - [ ] Wrapper for 3D mesh
 
 ## Example 2D annulus
