@@ -5,11 +5,6 @@
 # The graph of nodes V and edges E is represented
 # by an adjacency list G
 
-struct BellmanFordMoore{T, M}
-    prev::T
-    dist::M
-end
-
 # specialized implementation for on-the-fly weights
 function bfm(G::Dict{M, Set{M}}, source::Int, gr, U::Vector{T}) where {M,T}
 

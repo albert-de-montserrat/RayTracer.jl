@@ -21,16 +21,19 @@ using DelimitedFiles
 using Interpolations
 using CSV
 using DataFrames
-# using GLMakie
+using GLMakie
 
 include("GridAnnulus.jl")
 include("topology/topology.jl")
+include("SSSP/ssspm.jl")
 include("SSSP/dijkstra.jl")
 include("SSSP/bfm.jl")
 include("SSSP/bfm_multiphase.jl")
 include("SSSP/bfm_gpu.jl")
+include("SSSP/bfm_new.jl")
 include("SSSP/rcm.jl")
 include("Interpolations/interpolation.jl")
+include("plots/plots.jl")
  
 const R = 6371.0
 
@@ -55,7 +58,7 @@ struct VelProfile{T}
 end
 
 function velocity_profile()
-    fl = Float32.(readdlm("/home/albert/Desktop/RayTracer.jl/VelocityProfiles/R_Vp_Vs_AK135.txt"))
+    fl = Float32.(readdlm(joinpath(pwd(),"VelocityProfiles/R_Vp_Vs_AK135.txt")))
     depth = fl[:,1]
     # convert depth -> radius
     r = maximum(depth) .- depth

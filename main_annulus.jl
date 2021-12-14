@@ -2,12 +2,16 @@ using MAT
 include("src/ShortestPath.jl")
 
 # number of elements in the azimuthal and radial direction
-nθ, nr = 250, 90
-nθ, nr = 360, 360
+nθ, nr = 720, Int(R ÷ 20)
+nθ, nr = 180, 90
+spacing = 30
 # Instantiate grid
-gr, G = init_annulus(nθ, nr, spacing = 10)
+gr = init_annulus(nθ, nr, spacing = spacing)
 # @time Gsp = graph2sparse(G);
-@time Ga = sparse_adjacency_list(G);
+# @time Ga = sparse_adjacency_list(G)
+constrain2layers!(gr) 
+@time IM = incidence_matrix(gr)
+# constrain2layers!(IM, gr)
 
 # find source
 source_θ = 0.0
@@ -25,7 +29,8 @@ Vp = dual_velocity(round.(gr.r, digits=2), interpolant, buffer = 1)
 
 # Find Shortest path
 # @time D1 = bfm(Gsp, source, gr, Vp);
-@time D1 = bfm(Ga, source, gr, Vp);
+# @time D1 = bfm(Ga, source, gr, Vp);
+@time D1 = bfmtest(IM, source, gr, Vp);
 # @time D_vp2 = bfm_gpu(Gsp, source, gr, Vp);
 # @time D_vp = Dijkstra(G, source, gr, Vp);
 
@@ -44,16 +49,16 @@ layers = layers2plot()
 plot_paths(gr, paths, xs, zs, layers, source, receivers)
 
 # save travel times
-function save_matfile(D, gr, nθ, nr, source)
+function save_matfile(D, gr, nθ, nr, spacing, source; path = pwd())
     degs = Int(360 ÷ nθ)
     # find multiple receiver paths paths 
-    receivers_θ = 10f0:2f0:150f0
+    receivers_θ = 2f0:2f0:150f0
     receivers_θ = vcat(receivers_θ, reverse(360 .-receivers_θ) )
     receivers_r = R
     receivers = [closest_point(gr, deg2rad(deg), receivers_r; system = :polar) for deg in receivers_θ]
     paths = [recontruct_path(D.prev, source, r) for r in receivers]
 
-    fname = "vp_$(degs)degs_$(nr)rad_20km_spacing_NewVersion"
+    fname = joinpath(path, "vp_$(degs)degs_$(nr)rad_$(spacing)km_spacing")
     
     travel_times(D, gr, receivers; isave = true, flname = string(fname, ".csv"))
 
@@ -70,4 +75,5 @@ function save_matfile(D, gr, nθ, nr, source)
     close(file)
 end
 
-save_matfile(D1, gr, nθ, nr, source)
+save_matfile(D1, gr, nθ, nr, spacing, source, path = "/home/albert/Documents/tauP/TauP/RayFiles")
+# save_matfile(D1, gr, nθ, nr, spacing, source)

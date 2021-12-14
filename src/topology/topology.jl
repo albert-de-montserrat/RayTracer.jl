@@ -71,6 +71,24 @@ function adjacency_list(G::Dict)
 
 end
 
+function nodal_degree(G::Dict{T, Set{T}}) where T
+    n = length(G)
+    degrees = Vector{T}(undef, n)
+    Threads.@threads for i in 1:n
+        @inbounds degrees[i] = length(G[i])
+    end
+    return degrees
+end
+
+function element_degree(IM::SparseMatrixCSC{Bool, T}) where T
+    n = IM.n
+    degrees = Vector{T}(undef, n)
+    Threads.@threads for i in 1:n
+        @inbounds degrees[i] = length(nzrange(IM,i))
+    end
+    return degrees
+end
+
 struct SparseAdjencyList{T}
     list::Vector{T}
     deg::Vector{T}
@@ -94,6 +112,33 @@ function sparse_adjacency_list(G::Dict)
     end
         
     return SparseAdjencyList(adj_vector, deg, idx0)
+
+end
+
+function sparse_adjacency_list(IM::SparseMatrixCSC{Bool, Int64}, gr)
+    (; e2n, nnods) = gr
+    hint = maximum([length(e) for (_, e) in e2n]) ÷ 2
+    N = zeros(Int16, nnods)
+    for node in 1:IM.n
+        @inbounds for iel in @views IM.rowval[nzrange(IM, node)]    
+            N[node] += length(e2n[iel])
+        end
+    end
+
+    
+    Q = Dict{Int, Vector{Int}}() # 26 = max num of neighbours
+    for node in 1:IM.n
+        @inbounds for iel in @views IM.rowval[nzrange(IM, node)]    
+            if !haskey(Q, node)
+                # Q[node] = Set{Int64}()
+                Q[node] = e2n[iel]
+                # sizehint!(Q[node], N[node])
+            end
+            Q[node] = vcat(Q[node], e2n[iel])
+        end
+    end
+
+    # Q
 
 end
 

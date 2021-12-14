@@ -5,11 +5,6 @@
 # The classic implementation does not leave room for
 # parallelization or vectorization.
 
-struct Dijkstra{T, M}
-    prev::T
-    dist::M
-end
-
 const ∞ = Inf
 
 # classic implementation for given precomputed edge weights

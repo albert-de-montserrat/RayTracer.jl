@@ -4,12 +4,6 @@
 # approach (better suited for multi-threading). 
 # The graph of nodes V and edges E is represented
 # by an adjacency list G
-
-struct RadiusStepping{T, M}
-    prev::T
-    dist::M
-end
-
 function radius_stepping(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where T
 
     # unpack coordinates

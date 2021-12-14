@@ -28,6 +28,10 @@ macro cartesian(x::Union{Vector, Symbol, Expr}, z::Union{Vector, Symbol, Expr})
     esc(:( @.($z*sin($x)), @.($z*cos($x)) )) 
 end
 
+macro inn(expr)
+    esc(:(@views $expr[2:end-1]) )
+end
+
 function cartesian2polar(x::T, z::T) where T<:Real 
     θ = atan(x,z)
     if θ < 0
@@ -51,29 +55,39 @@ polar2cartesian(x::T, z::T) where T<:Real = (z*sin(x), z*cos(x))
 polar2cartesian(x::Vector, z::Vector) = (@. z*sin(x)), (@. z*cos(x))
 
 function init_annulus(
-    nθ::Int64, nr::Int64; spacing = 20, r_out = 6371.0,
+    nθ::Int64, nr::Int64; spacing = 20
     )
 
     # grid containing only primary nodes
-    gr = primary_grid(nθ, nr, r_out)
+    gr = primary_grid(nθ, nr, R)
     
     # add secondary nodes between cell vertices
     gr = secondary_nodes(gr, spacing = spacing)
 
     # add nodes at velocity boundary layers
-    nnods0 = length(gr.x)
-    dθ, dr = 2*π/nθ, r_out/nr 
-    G, gr, nnods0 = add_discontinuities(gr, spacing, dθ, dr)
-    cleanse_graph!(G)
+    # nnods0 = length(gr.x)
+    # dθ, dr = 2*π/nθ, R/nr 
+    # gr, nnods0 = add_discontinuities(gr, spacing, dθ, dr)
+
+    # IM = incidence_matrix(gr)
+    # G = nodal_incidence(gr)
+
+    # cleanse_graph!(G)
 
     # constrain adjacency list to a given layer
-    constrain2layers!(G, gr)
+    # constrain2layers!(IM, gr)
+    # constrain2layers!(G, gr)
 
-    return gr, G
+    # return gr, G
+    return gr
 end
 
 function primary_grid(nθ, nr, r_out)
-    
+
+    rl = R.-[20f0, 35f0, 210f0, 410f0, 660f0, 2740f0, 2891.5f0]
+
+    nr += length(rl)
+
     nn = nr*nθ # total number of nodes
     nels = (nr-1)*nθ
     r = fill(0.0, nn+1)
@@ -81,11 +95,17 @@ function primary_grid(nθ, nr, r_out)
     dθ = 2*π/nθ
     dr = r_out/nr 
     # r_in = r_out - dr*(nr-1)
-    r_in = 1 # significantly reduces the maxium nodal degree
+    r_in = 0.1 # significantly reduces the maxium nodal degree
     # -- Nodal positions
+    r_column = vcat(
+        rl,
+        LinRange(r_in, r_out, nr-length(rl))
+    )
+    sort!(r_column)
+
     @inbounds for ii in 1:nθ
         idx = @. (1:nr) + nr*(ii-1)
-        r[idx] .= LinRange(r_in, r_out, nr)
+        r[idx] .= r_column #LinRange(r_in, r_out, nr)
         θ[idx] .= dθ*(ii-1)
     end
     # center of the core
@@ -149,14 +169,15 @@ function primary_grid(nθ, nr, r_out)
     return gr
 end
 
-@inbounds function add_discontinuities(gr, spacing, dθ, dr)
+@inbounds function add_discontinuities(gr, spacing, nθ, dθ, dr)
     # add velocity boundaries
-    layers = velocity_layers(spacing)
+    layers = velocity_layers(nθ, spacing)
     global_idx = nnods0 = length(gr.x)
-    neighbours = gr.neighbours
+    # neighbours = gr.neighbours
     for l in layers
         # cartesian coordinates of the boundary
-        θl, rl = cartesian2polar(l[1], l[2])
+        # θl, rl = cartesian2polar(l[1], l[2])
+        θl, rl = l[1], l[2]
         for (θi, ri) in zip(θl, rl)
             # new node global index
             global_idx += 1
@@ -166,17 +187,17 @@ end
             iel = (nr-1)*θreps + rreps - 1
             # add to connectivity matrix
             push!(gr.e2n[iel], global_idx)
-            # add node to 2 levels of adjacency
-            for i1 in neighbours[iel]
-                if global_idx ∉ gr.e2n[i1]
-                    push!(gr.e2n[i1], global_idx)
-                end
-                # for i2 in neighbours[i1]
-                #     if global_idx ∉ gr.e2n[i2]
-                #         push!(gr.e2n[i2], global_idx)
-                #     end
-                # end
-            end
+            # # add node to 2 levels of adjacency
+            # for i1 in neighbours[iel]
+            #     if global_idx ∉ gr.e2n[i1]
+            #         push!(gr.e2n[i1], global_idx)
+            #     end
+            #     # for i2 in neighbours[i1]
+            #     #     if global_idx ∉ gr.e2n[i2]
+            #     #         push!(gr.e2n[i2], global_idx)
+            #     #     end
+            #     # end
+            # end
             # add  to elements on both sides
             if θi == 0
                 θreps = Int(fld(2π, dθ))
@@ -198,9 +219,9 @@ end
     end
 
     # concatenate nodes of velocity boundaries
-    lθ = [cartesian2polar(l[1], l[2]) for l in layers]
-    θboundary = reduce(vcat, l[1] for l in lθ)
-    rboundary = reduce(vcat, l[2] for l in lθ)
+    # lθ = [cartesian2polar(l[1], l[2]) for l in layers]
+    θboundary = reduce(vcat, l[1] for l in layers)
+    rboundary = reduce(vcat, l[2] for l in layers)
     # convert to polar coordinates
     xboundary, zboundary = polar2cartesian(θboundary, rboundary)
 
@@ -218,11 +239,11 @@ end
         gr.element_type
     )
 
-    G = nodal_incidence(gr)
+    # G = nodal_incidence(gr)
 
     # constrain2layers!(G, gr)
 
-    return G, gr, nnods0
+    return gr, nnods0
 
 end
 
@@ -265,21 +286,70 @@ function add_star_levels!(G, G0, star_levels)
     end
 end
 
-function velocity_layers(spacing)
+function velocity_layers(nθ, spacing)
     # depth of velocity boundary layers
     r = R.-(20f0, 35f0, 210f0, 410f0, 660f0, 2740f0, 2891.5f0)
-    # discretization of the layers 
-    npoints = [Int(ri*2*π ÷ spacing) for ri in r]
-    npoints[1:3] .= min.(npoints[1:3].*2, 40_000)
-    # make layers
-    layers = [circle(np, ri, pop_end = true) for (ri, np) in zip(r, npoints)]
+    # # discretization of the layers 
+    # npoints = [Int(ri*2*π ÷ spacing) for ri in r]
+    # npoints[1:3] .= min.(npoints[1:3].*2, 40_000)
+    # # make layers
+    # layers = [circle(np, ri, pop_end = true) for (ri, np) in zip(r, npoints)]
+    l0 = [circle(nθ, ri, pop_end = false, system = :polar) for ri in r]
+
+    layers = [add_mid_points(l, spacing) for l in l0]
 
     return layers
 end
 
-function constrain2layers!(G, gr)
+function add_mid_points(l::Tuple{AbstractArray, AbstractArray}, spacing)
+
+    n = length(l[1])-1
+    r = l[2][1]
+    deg = spacing/r
+
+    mid_θ = reduce(vcat,
+        LinRange(l[1][i], l[1][i+1], Int(abs(l[1][i]-l[1][i+1])÷deg))[2:end-1] for i in 1:n-1
+    ) 
+    mid_θ = vcat(mid_x, LinRange(l[1][end-1], 2π, Int(abs(l[1][end-1]-2π)÷deg))[2:end-1])
+
+    l_θ = vcat(l[1], mid_x)
+    sort!(l_θ)
+    l_r = fill(r, length(l_θ))
+
+    return l_θ, l_r
+end
+
+function constrain2layers!(gr::Grid2D) 
     rlayer = (R, R-20, R-35, R-210, R-410, R-660, R-2740, R-2891.5)
-    rin =  @views rlayer[2:end-1]
+    # innr = @inn rlayer
+    (; neighbours, element_type, e2n, r, nel) = gr
+
+    element_boundary = Vector{Int64}(undef, nel)
+
+    # find element layer
+    for i in 1:nel
+        type_i = element_type[i]
+        element = e2n[i]
+        if type_i == :Quad
+            center = (r[element[1]] + r[element[2]] + r[element[3]] + r[element[4]])*0.25
+        else
+            center = (r[element[1]] + r[element[2]] + r[element[3]])*0.33
+        end
+        element_boundary[i] = find_boundary(center, rlayer)
+    end
+
+    # find element layer
+    for i in 1:nel
+        n = neighbours[i]
+        ikeep = element_boundary[n] .== element_boundary[i]
+        gr.neighbours[i] = neighbours[i][ikeep]
+    end
+
+end
+
+function constrain2layers!(G::Dict, gr)
+    rlayer = (R, R-20, R-35, R-210, R-410, R-660, R-2740, R-2891.5)
+    innr =  @views rlayer[2:end-1]
     r = gr.r
 
     @inbounds for (i, Gi) in G
@@ -307,7 +377,7 @@ function constrain2layers!(G, gr)
                 (r[idx] > upper_limit) && delete!(G[i], idx)
             end
 
-        elseif ri ∈ rin
+        elseif ri ∈ innr
             idx = findall(ri .== rlayer)[1]
             upper_limit, lower_limit = rlayer[idx-1], rlayer[idx+1]
 
@@ -321,11 +391,20 @@ function constrain2layers!(G, gr)
 
 end
 
-function find_layer(ri, rlayer)
+@inbounds function find_layer(ri, rlayer)
     ri < rlayer[end] && return (rlayer[end], 0f0)
     for i in 1:length(rlayer)-1
         if rlayer[i] > ri > rlayer[i+1]
             return (rlayer[i], rlayer[i+1])
+        end
+    end
+end
+
+@inbounds function find_boundary(ri, rlayer)
+    ri < rlayer[end] && return 1
+    for i in 1:length(rlayer)-1
+        if rlayer[i] > ri > rlayer[i+1]
+            return i+1
         end
     end
 end
@@ -349,23 +428,39 @@ function cleanse_graph!(G)
     end
 end
 
-function element_neighbours(e2n)    
-    # els = size(e2n,1) == 3 ? e2n : view(e2n, 1:3,:)
-    nel = length(e2n)
-
+function incidence_matrix(gr)
+    (; e2n, nnods) = gr
+    hint = nnods*9
     # Incidence matrix
     I, J, V = Int[], Int[], Bool[]
-    @inbounds for i in eachindex(e2n)
-        element = e2n[i]
-        for j in eachindex(element)
-            node = element[j]
+    sizehint!(I, hint)
+    sizehint!(J, hint)
+    sizehint!(V, hint)
+    @inbounds for (i, element) in e2n
+        for node in element
             push!(I, node)
             push!(J, i)
             push!(V, true)
         end
     end
     incidence_matrix = sparse(J, I, V)
+end
 
+function element_neighbours(e2n)    
+    # els = size(e2n,1) == 3 ? e2n : view(e2n, 1:3,:)
+    nel = length(e2n)
+
+    # Incidence matrix
+    I, J, V = Int[], Int[], Bool[]
+    @inbounds for (i, element) in (e2n)
+        for node in element
+            push!(I, node)
+            push!(J, i)
+            push!(V, true)
+        end
+    end
+    incidence_matrix = sparse(J, I, V)
+   
     # Find neighbouring elements
     neighbour = [Int64[] for _ in 1:nel]
     @inbounds for node in 1:nel
@@ -473,15 +568,29 @@ function edge_connectivity(gr)
 
 end
 
+struct MeshTopology
+    V_element::Dict{Int64, Vector{Int64}} # element vertices
+    E::Dict{Int64, Set{Int64}} # edges
+    E_element::Dict{Int64, Vector{Int64}} # element edges
+    E_parents::Dict{Int64, Set{Int64}} # element parents of given edge
+    neighbours::Vector{Vector{Int64}} # element neighbours
+    nV::Int # number of vertices
+    nE::Int # number of edges
+end
+
 function secondary_nodes(gr; spacing = 20)
     
     e2n, θ, r = gr.e2n, gr.θ, gr.r
     neighbours = gr.neighbours
 
-    _, edges2node, edge2el = edge_connectivity(gr)
+    element2edge, edges2node, edge2el = edge_connectivity(gr)
+    edge = Dict{Int, Set{Int}}()
+    for (i, e) in edges2node
+        @inbounds edge[i] = Set(e)
+    end
     nedges = length(edges2node)
     # make mid points
-    nnods = length(edges2node) * 40
+    nnods = length(edges2node) * 4*111*4
     θmid = Vector{Float64}(undef, nnods)
     rmid = similar(θmid)
     ϵ =  2π-(1-1/gr.nθ)
@@ -521,21 +630,11 @@ function secondary_nodes(gr; spacing = 20)
                 # new coordinate
                 θmid[global_idx] = θbar[1] + Δθ
                 rmid[global_idx] = rbar[1] + Δr
+                # add node to edge
+                push!(edge[i], global_idx+nnods0)
                 # add node to connectivity matrix
                 for iel in edge2el[i]
                     push!(gr.e2n[iel], global_idx+nnods0)
-
-                    # add node to 2 levels of adjacency
-                    for i1 in neighbours[iel]
-                        if global_idx+nnods0 ∉ gr.e2n[i1]
-                            push!(gr.e2n[i1], global_idx+nnods0)
-                        end
-                        # for i2 in neighbours[i1]
-                        #     if global_idx ∉ gr.e2n[i2]
-                        #         push!(gr.e2n[i2], global_idx)
-                        #     end
-                        # end
-                    end
                 end
                 # update dictionary
                 mid2nodes[global_idx+nnods0] = idx
@@ -561,20 +660,18 @@ function secondary_nodes(gr; spacing = 20)
         gr.element_type
     )
 
-    # G = nodal_incidence(gr, star_levels =1)
 
-    # # expand adjacency list of edge nodes 
-    # # @inbounds 
-    # for (imid, ibar) in mid2nodes
-    #     if  center ∉ G[ibar[1]]
-    #         union!(G[imid], G[ibar[1]])
-    #     end
-    #     if  center ∉ G[ibar[2]]
-    #         union!(G[imid], G[ibar[2]])
-    #     end
-    # end
+    # topology = MeshTopology(
+    #     gr.e2n,
+    #     edge,
+    #     element2edge,
+    #     edge2el,
+    #     gr.neighbours,
+    #     gr.nnods,
+    #     length(edge)
+    # )
 
-    return gr #, G
+    return gr
 end
 
 function edge_length(θbar, rbar)
@@ -645,47 +742,51 @@ end
 function nodal_incidence(gr::Grid2D)
     e2n = gr.e2n
     nels = gr.nel
-    nnods = length(gr.x)
-    nmin, nmax = 8 .* extrema([length(n) for (i,n) in e2n])
-    # Q = Dict{Int, Set{Int}}() # 26 = max num of neighbours
-    Q = [zeros(Int, nmax) for _ in 1:nnods] # 26 = max num of neighbours
-    N = zeros(Int, nnods) # num of neighbours found
+    # nnods = length(gr.x)
+    # nmin, nmax = 8 .* extrema([length(n) for (i,n) in e2n])
+    Q = Dict{Int, Set{Int}}() # 26 = max num of neighbours
+    # Q = [zeros(Int, nmax) for _ in 1:nnods] # 26 = max num of neighbours
+    # N = zeros(Int, nnods) # num of neighbours found
 
+    # @inbounds for i in 1:nels
+    #     element_nodes = e2n[i]
+
+    #     for nJ in element_nodes
+    #         Qi = Q[nJ]
+    #         for nI in element_nodes
+    #             add_edge!(Qi, N, nI, nJ)
+    #         end
+    #     end
+    # end
+    
     @inbounds for i in 1:nels
         element_nodes = e2n[i]
-
         for nJ in element_nodes
+            if !haskey(Q, nJ)
+                Q[nJ] = Set{Int64}()
+                # sizehint!(Q[nJ], nmax)
+            end
+            # union!(Q[nJ], element_nodes)
+
             Qi = Q[nJ]
             for nI in element_nodes
-                add_edge!(Qi, N, nI, nJ)
+                if nI != nJ && nI ∉ Qi
+                    # update helpers
+                    # N[nJ] += 1
+                    push!(Q[nJ], nI)
+                end
             end
         end
     end
     
-    # @inbounds for i in 1:nels
-    #     element_nodes = connectivity_matrix[i]
-    #     for nJ in element_nodes
-    #         if !haskey(Q, nJ)
-    #             Q[nJ] = Set{Int64}()
-    #             sizehint!(Q[nJ], nmax)
-    #         end
-    #         union!(Q[nJ], element_nodes)
-
-    #         # Qi = Q[nJ]
-    #         # for nI in element_nodes
-    #         #     if nI != nJ && nI ∉ Qi
-    #         #         # update helpers
-    #         #         # N[nJ] += 1
-    #         #         push!(Q[nJ], nI)
-    #         #     end
-    #         # end
-    #     end
-    # end
-    
     return Q
 end
 
-distance(ax::Real, az::Real, bx::Real, bz::Real) = √((ax-bx)^2 + (az-bz)^2)
+# distance(ax::Real, az::Real, bx::Real, bz::Real) = √((ax-bx)^2 + (az-bz)^2)
+distance(ax::Real, az::Real, bx::Real, bz::Real) = √(muladd(az - bz, az - bz, (ax - bx) * (ax - bx)))
+# distance(ax::Real, az::Real, bx::Real, bz::Real) = √(square(ax,-bx) + square(az,-bz))
+
+square(a::Real, b::Real) = muladd(b, b, muladd(2a, b, a * a))
 
 distance(a::Point2D{Cartesian}, b::Point2D{Cartesian}) = √((a.x-b.x)^2 + (a.z-b.z)^2)
 
@@ -713,13 +814,66 @@ function closest_point(gr, px, pz; system = :cartesian)
     return index
 end
 
-function circle(N, r; pop_end = true) 
+function circle(N, r; pop_end = true, system=:cartesian) 
     t = LinRange(0, Float32(2π), N)
-    x = @. r*sin(t)
-    z = @. r*cos(t)
+    if system == :cartesian
+        x = @. r*sin(t)
+        z = @. r*cos(t)
+    else
+        x = t
+        z = fill(r, N)
+    end
     if pop_end
         pop!(x)
         pop!(z)
     end
     return x, z
+end
+
+function velocity_layers(gr, nθ, spacing)
+    # depth of velocity boundary layers
+    rl = R.-(20f0, 35f0, 210f0, 410f0, 660f0, 2740f0, 2891.5f0)
+
+    new_θ = Float64[]
+    new_r = Float64[]
+
+    for iel in gr.nel
+        element = gr.e2n[iel]
+        check, ilayer = isinlayer(element, rl)
+        if check # break element in two
+            rl_i = rl[ilayer]
+            degs = spacing/rl_i
+
+            iabove = gr.r[element] .> rl_i
+            min_θ, max_θ = extrema((gr.θ[element[1]], gr.θ[element[2]], gr.θ[element[3]], gr.θ[element[4]]))
+
+            if (max_θ-min_θ) > π
+                min_θ = 2π
+            end
+            layer_θ = LinRange(min_θ, max_θ, Int((max_θ-min_θ) ÷ degs) )
+            layer_r = fill(rl_i, length(layer_θ))
+
+            element1 = @view element[iabove]
+            element2 = @view element[.!iabove]
+        end
+    end
+
+    # # discretization of the layers 
+    # npoints = [Int(ri*2*π ÷ spacing) for ri in r]
+    # npoints[1:3] .= min.(npoints[1:3].*2, 40_000)
+    # # make layers
+    # layers = [circle(np, ri, pop_end = true) for (ri, np) in zip(r, npoints)]
+    l0 = [circle(nθ, ri, pop_end = false, system = :polar) for ri in r]
+
+    layers = [add_mid_points(l, spacing) for l in l0]
+
+    return layers
+end
+
+function isinlayer(element, rl) # make a @generated function
+    min_r, max_r = extrema((gr.r[element[1]], gr.r[element[2]], gr.r[element[3]], gr.r[element[4]]))
+    for (i, r) in enumerate(rl)
+        min_r ≤ r ≤ max_r && return true, i
+    end
+    return false, 0
 end

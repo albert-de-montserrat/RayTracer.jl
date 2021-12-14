@@ -1,11 +1,4 @@
-function nodal_degree(G::Dict{T, Set{T}}) where T
-    n = length(G)
-    degrees = Vector{T}(undef, n)
-    Threads.@threads for i in 1:n
-        @inbounds degrees[i] = length(G[i])
-    end
-    return degrees
-end
+
 
 function symrcm(adjgr::Dict, degrees::Vector{T}) where {T}
     # Initialization
