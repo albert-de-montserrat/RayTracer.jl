@@ -17,28 +17,26 @@
 ```julia
 include("src/ShortestPath.jl")
 
-# number of elements in the azimuthal and radial direction
-nθ, nr = 180, 60
 # Instantiate grid
-gr, G = init_annulus(nθ, nr, spacing = 20, star_levels = 2)
-# Transform graph into appropriate data type
-Ga = sparse_adjacency_list(G);
+nθ, nr = 180, 50
+spacing = 1 # [km] distance between secondary nodes
+gr, G, halo = init_annulus(nθ, nr, spacing = spacing);
 
-# find source node
-source_θ, source_r = 0.0, R # e.g. node at north pole
+# find source
+source_θ, = 0.0, R # sorce node coordinate
 source = closest_point(gr, source_θ, source_r; system = :polar)
 
 # Load Vp-Vs Earths Profile
-profile = velocity_profile() # AK135
+profile = velocity_profile() # AK135 by default
 # make velocity interpolant
 interpolant = LinearInterpolation(profile.r, profile.Vp)
 
 # Vp and Vs profiles interpolated onto the grid
-Vp = interpolate_velocity(round.(gr.r, digits=2), interpolant, buffer = 0)
-Vp = dual_velocity(round.(gr.r, digits=2), interpolant, buffer = 1)
+Vp = interpolate_velocity(gr.r, interpolant)
 
 # Find Shortest path
-D = bfm(Ga, source, gr, Vp);
+D = bfm(G, halo, source, gr, Vp); # Cpu version ~OpenMP 
+Dgpu = bfm_gpu(G, halo, source, gr, Vp); # GPU version
 
 # find multiple receiver paths paths
 receivers_θ = 10f0:10f0:150f0
