@@ -1,19 +1,17 @@
 # RayTracer.jl
 ## Current dependencies 
 
-1. SparseArrays (likely to be deprecated)
+1. SparseArrays
 2. Interpolations
-3. CUDA (experimental)
+3. CUDA ~(experimental)~
 4. DelimitedFiles
-5. to generate output: CSV, DataFrames, MAT (MATLAB output format shall be deprecated for release version)
+5. to generate output: CSV, DataFrames, MAT (MATLAB output format shall be deprecated in release version)
 
 ## TODO list
-- [ ] API
 - [x] Optimize sparse graph (moved from SparseArray to custom data structured + parallelized)
-- [ ] PRIORITY: Optimize generation of adjacency list (now it crashes for spacing < 15km)
-- [ ] Look for vectorization opportunities ??
+- [x] ~Optimize generation of adjacency list~ Rework memory layout of adjency list
 - [ ] Re-write Cuthill-McKee algorithm (node re-ordering)
-- [ ] Wrapper for 3D mesh
+- [ ] 3D mesh wrapper
 
 ## Example 2D annulus
 ```julia
