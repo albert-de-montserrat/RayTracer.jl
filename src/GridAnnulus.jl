@@ -64,22 +64,11 @@ function init_annulus(
     # add secondary nodes between cell vertices
     gr = secondary_nodes(gr, spacing = spacing)
 
-    # add nodes at velocity boundary layers
-    # nnods0 = length(gr.x)
-    # dθ, dr = 2*π/nθ, R/nr 
-    # gr, nnods0 = add_discontinuities(gr, spacing, dθ, dr)
-
-    # IM = incidence_matrix(gr)
-    # G = nodal_incidence(gr)
-
-    # cleanse_graph!(G)
-
-    # constrain adjacency list to a given layer
-    # constrain2layers!(IM, gr)
-    # constrain2layers!(G, gr)
-
-    # return gr, G
-    return gr
+    constrain2layers!(gr) 
+    gr, halo = discontinuous_boundaries(gr, spacing)
+    G = element_incidence(gr)
+    
+    return gr, G, halo
 end
 
 function primary_grid(nθ, nr, r_out)
@@ -444,6 +433,59 @@ function incidence_matrix(gr)
         end
     end
     incidence_matrix = sparse(J, I, V)
+end
+
+function element_incidence(gr)
+    (; e2n, nnods, neighbours) = gr
+    hint = nnods*9
+    # Incidence matrix
+    I, J, V = Int[], Int[], Bool[]
+    sizehint!(I, hint)
+    sizehint!(J, hint)
+    sizehint!(V, hint)
+    @inbounds for (i, element) in e2n
+        # local element
+        for node in element
+            push!(I, i)
+            push!(J, node)
+            push!(V, true)
+
+            # neighbouring elements
+            for neighbour_element in neighbours[i]
+                push!(I, neighbour_element)
+                push!(J, node)
+                push!(V, true)
+            end
+        end
+        # # neighbouring elements
+        # for neighbour_element in neighbours[i]
+        #     for node in e2n[neighbour_element]
+        #         push!(I, neighbour_element)
+        #         push!(J, node)
+        #         push!(V, true)
+        #     end
+        # end
+    end
+    G = sparse(I, J, V)
+end
+
+function unconstrained_element_incidence(gr)
+    (; e2n, nnods) = gr
+    hint = nnods*9
+    # Incidence matrix
+    I, J, V = Int[], Int[], Bool[]
+    sizehint!(I, hint)
+    sizehint!(J, hint)
+    sizehint!(V, hint)
+    @inbounds for (i, element) in e2n
+        # local element
+        for node in element
+            push!(I, i)
+            push!(J, node)
+            push!(V, true)
+        end
+    end
+    incidence_matrix = sparse(I, J, V)
 end
 
 function element_neighbours(e2n)    
@@ -876,4 +918,65 @@ function isinlayer(element, rl) # make a @generated function
         min_r ≤ r ≤ max_r && return true, i
     end
     return false, 0
+end
+
+function discontinuous_boundaries(gr, spacing)
+    # velocity disconuity radii
+    rl = R.-(20f0, 35f0, 210f0, 410f0, 660f0, 2740f0, 2891.5f0)
+    # unpack from grid object
+    (; nel, r, e2n, nnods) = gr
+    # indices of nodes to be doubled
+    idx = Int64[]
+    sizehint!(idx, Int64(sum(@.(2π*rl÷spacing))) )
+    counter = nnods
+    for i in 1:nel
+        @inbounds if r[e2n[i][3]] ∈ rl
+            iboundary = findfirst(r[e2n[i][3]] .∈ rl)
+            #iterate over element
+            for (j, node) in enumerate(e2n[i])
+                if r[node] == rl[iboundary]
+                    # update counter
+                    counter += 1
+                    # modify connectivity matrix
+                    e2n[i][j] = counter
+                    # store index
+                    push!(idx, node)
+                end
+            end
+
+        end
+    end
+
+    # discontinuous nodes coordinates
+    θ = gr.θ[idx]
+    r = gr.r[idx] .- 0.05
+    # gr.r[idx] .+= 1e-3
+    x, z = polar2cartesian(θ, r)
+
+    # shared nodes map
+    halo = Matrix{Int64}(undef, length(idx)*2, 2)
+    nidx = length(idx)
+    for (_i, i) in enumerate(idx)
+        halo[_i, 1] = i
+        halo[_i, 2] = _i + nnods
+        halo[_i+nidx, 2] = i
+        halo[_i+nidx, 1] = _i + nnods
+    end
+
+    # store new grid
+    gr = Grid2D(
+        vcat(gr.x, x),
+        vcat(gr.z, z),
+        vcat(gr.θ, θ),
+        vcat(gr.r, r),
+        e2n,
+        gr.nθ,
+        gr.nr,
+        gr.nel,
+        length(x)+length(gr.x),
+        gr.neighbours,
+        gr.element_type
+    )
+
+    return gr, halo
 end

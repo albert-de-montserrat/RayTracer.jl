@@ -1,4 +1,8 @@
-function plot_paths(gr, paths, xs, zs, layers, source, receivers)
+function plot_paths(gr, paths, source, receivers)
+    Nsurf = 360 # number of points
+    xs, zs = circle(Nsurf, R, pop_end = false)
+    layers = layers2plot()
+
     npaths = length(paths)
 
     f, ax, = lines(xs, zs, color = :black, linewidth=2)

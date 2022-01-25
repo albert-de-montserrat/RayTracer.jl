@@ -1,4 +1,3 @@
-using MuladdMacro
 
 include("barycentric.jl")
 include("bilinear.jl")

@@ -143,7 +143,6 @@ function sparse_adjacency_list(IM::SparseMatrixCSC{Bool, Int64}, gr)
 end
 
 @inbounds function find_layer_number(ri, rlayer)
-    
     ri > rlayer[1] && return 1
     ri < rlayer[end] && return length(rlayer)+1
 
@@ -176,7 +175,8 @@ struct GridPartition{dimB, dimL, T, M, N, B}
         for i in 2:nlayers-1
             # For convinience, the put first the boundary where the SSSP is going to be restarted
             LayerIterations[i] = (layers[i], boundaries[i-1], boundaries[i])
-            LayerIterations[nmax-i+1] = (layers[i], boundaries[i], boundaries[i-1],)
+            # LayerIterations[nmax-i+1] = (layers[i], boundaries[i], boundaries[i-1],) # original
+            LayerIterations[nmax-i+1] = (layers[i], boundaries[i-1], boundaries[i]) 
         end
         LayerIterations[nlayers] = (layers[end], boundaries[end])
 
@@ -213,40 +213,3 @@ function partition_grid(gr)
     return GridPartition(LayerID, rlayer)
 
 end
-
-
-# function readtest(G::Dict)
-#     a = zeros(length(G))
-#     for (i, Q) in G
-#         for Qi in Q
-#             a[i] = Qi
-#         end
-#     end
-# end
-
-# function readtest(List::AdjencyList)
-#     G = List.G
-#     N = List.N
-#     a = zeros(length(G))
-#     # tmp = zeros(size(G, 1))
-
-#     for j in axes(G, 2)
-#         for i in 1:N[j]
-#             a[i] = G[i, j]
-#         end
-#     end
-# end
-
-# function readtest(Gsp::SparseMatrixCSC)
-#     n = size(Gsp, 2)
-#     a = zeros(n)
-#     for j in 1:n
-#         for Gi in @views Gsp.rowval[nzrange(Gsp, j)]
-#             a[i] = Gi
-#         end
-#     end
-# end
-
-# @benchmark readtest($G)
-# @benchmark readtest($A)
-# @benchmark readtest($Gsp)

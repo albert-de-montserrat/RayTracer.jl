@@ -177,33 +177,3 @@ function min_distance(Q::Set{Int}, dist::Vector{T}) where T
     end
     return idx
 end
-
-function recontruct_path(D, source, receiver)
-    prev = D.prev
-    path = Int[receiver]
-    ipath = prev[receiver]
-    while ipath ∉ path
-        # while ipath != source
-        push!(path, ipath)
-        # if !haskey(prev, ipath)
-        #     break
-        # end
-        @show ipath = prev[ipath]
-    end
-    push!(path, source)
-
-    return path
-end
-
-@inbounds function recontruct_path(prev::Vector, source, receiver)
-    path = Int[receiver]
-    ipath = prev[receiver]
-    while ipath != source
-        push!(path, ipath)
-        ipath = prev[ipath]
-        # @show ipath
-    end
-    push!(path, source)
-
-    return path
-end
