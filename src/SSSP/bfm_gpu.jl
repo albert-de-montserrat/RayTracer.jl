@@ -36,38 +36,6 @@ function e2n2gpu(e2n::Dict{T, Vector{T}}) where T
     
 end
 
-# specialized implementation for on-the-fly weights
-function bfm_gpu(Gsp::SparseMatrixCSC, source::Int, gr, U::Vector{T}) where {T}
-   
-    # move arrays to GPU
-    graph_d, mesh_d, Q, dist, dist0, p = move2device(Gsp, U, gr, source)
-
-    # main loop
-    it = 1
-    @inbounds while sum(Q) != 0
-        
-        # relax edges (parallel process)
-        relaxation_BFM!(Q, dist, dist0, p, mesh_d, graph_d)
-        
-        # pop queue (serial-but-fast process)
-        CUDA.fill!(Q, false)
-
-        # update nodal queue (parallel process)
-        update_bfm!(Q, dist, dist0, graph_d)
-
-       # update old distance vector (TODO parallel version)
-        copyto!(dist0, dist)
-
-        it+=1
-    end
-
-    println("Converged in $it iterations")
-    p_cpu = Array(p)
-    dist_cpu = Array(dist)
-
-    return BellmanFordMoore(p_cpu, dist_cpu)
-end
-
 function _gpu_relaxation_BFM!(Q, K, p, dist, dist0, n1, n2, x, z, U)
 
     index = (blockIdx().x-1) * blockDim().x + threadIdx().x
@@ -159,6 +127,7 @@ function sparse2gpu(K::SparseMatrixCSC)
     nz2 = similar(nz1)
     @inbounds for j in 1:K.n
         r = nzrange(K, j)
+        # a, b = extrema(r.start, r.stop) # indices can be inverted e.g. imax:imin
         a = min(r.start, r.stop) # indices can be inverted e.g. imax:imin
         b = max(r.start, r.stop) # indices can be inverted e.g. imax:imin
         nz1[j] = a
@@ -236,7 +205,7 @@ function move2device(K, U, gr, source)
 
 end
 
-function bfm_gpu_new(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Int, gr, U::AbstractArray{T}) where {M,T}
+function bfm_gpu(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Int, gr, U::AbstractArray{T}) where {M,T}
 
     element_connectivity_d, e2n_d, mesh_d, Q, dist, dist0, p = move2device(G, U, gr, source)
 
@@ -245,18 +214,15 @@ function bfm_gpu_new(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Int, gr,
     init_halo!(p, halo_d)
 
     # 1st frontier nodes are nodes adjacent to the source
-    init_Q!(Q, element_connectivity_d, e2n_d)
+    init_Q!(Q, element_connectivity_d, e2n_d, source)
 
     # main loop
     it = 1
-    to = TimerOutput()
+    
     # covergence: if the queue is empty we are done
     @inbounds while sum(Q) != 0
-        # relax edges (parallel process)
-        # relax!(dist, p, dist0, G, Q, e2n, x, z, r, U)
-        # @btime relax!($dist, $p, $dist0, $G, $Q, $e2n, $x, $z, $r, $U)
-            
-        @timeit to "relax" relaxation_BFM2!(
+        # relax edges (parallel process)         
+        relaxation_BFM2!(
             Q, 
             dist, 
             dist0, 
@@ -267,17 +233,17 @@ function bfm_gpu_new(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Int, gr,
         )
 
         # update_halo!(p, dist, dist0, halo_d)
-        @timeit to "halo update" update_halo2!(p, dist, dist0, halo_d)
+        update_halo2!(p, dist, dist0, halo_d)
 
         # pop queue (serial-but-fast process)
-        @timeit to "fill"  CUDA.fill!(Q, false)
+        CUDA.fill!(Q, false)
 
         # update nodal queue (parallel process)
-        @timeit to "update Q"  update_Q!(Q,  dist, dist0, element_connectivity_d, e2n_d)
+        update_Q!(Q,  dist, dist0, element_connectivity_d, e2n_d)
         # @btime update_Q!($Q, $G, $dist, $dist0, $e2n)
 
         # update old distance vector (TODO parallel version)
-        @timeit to "copy"  copyto!(dist0, dist)
+        copyto!(dist0, dist)
 
         # update iteration counter
         it+=1
@@ -285,17 +251,16 @@ function bfm_gpu_new(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Int, gr,
 
     println("Converged in $it iterations")
 
-    return to
-    # return BellmanFordMoore(p, dist)
+    return BellmanFordMoore(p, dist)
 end
 
-function init_halo_path!(p, halo)
-    n = length(halo) ÷ 2
-    @inbounds for i in 1:n
-        p[halo[i, 2]] = halo[i,1]
-        p[halo[i, 1]] = halo[i,2]
-    end
-end
+# function init_halo_path!(p, halo)
+#     n = length(halo) ÷ 2
+#     @inbounds for i in 1:n
+#         p[halo[i, 2]] = halo[i,1]
+#         p[halo[i, 1]] = halo[i,2]
+#     end
+# end
 
 function _init_halo!(p, halo_d, n)
     # update queue: if new distance is smaller 
@@ -411,7 +376,7 @@ function _init_Q!(Q, K, e2n, n11, n21, n12, n22, source)
     return 
 end
 
-function init_Q!(Q::CuArray{Bool}, element_connectivity_d::CuGraph, e2n_d::CuGraph)
+function init_Q!(Q::CuArray{Bool}, element_connectivity_d::CuGraph, e2n_d::CuGraph, source)
     # unpack graph arrays
     K, n11, n21 = element_connectivity_d.K, element_connectivity_d.n1, element_connectivity_d.n2
     e2n, n12, n22 = e2n_d.K, e2n_d.n1, e2n_d.n2

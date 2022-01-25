@@ -837,15 +837,16 @@ function closest_point(gr, px, pz; system = :cartesian)
     dist = Inf
     di = 0.0
     index = -1
-    for i in 1:n
 
-        if system == :cartesian
-            @inbounds di = distance(gr.x[i], gr.z[i], px, pz)
-        
-        elseif system == :polar
-            @inbounds di = distance(gr.θ[i], gr.r[i], px, pz)
-        
-        end
+    v_x, v_z = ifelse(
+        system == :cartesian,
+        (gr.x, gr.z),
+        (gr.θ, gr.r)
+    )
+
+    @inbounds for i in 1:n
+
+        di = distance(v_x[i], v_z[i], px, pz)
 
         if di < dist
             index = i

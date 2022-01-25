@@ -1,4 +1,4 @@
-# module ShortestPath
+module RayTracer
 
 using SparseArrays
 using MuladdMacro
@@ -21,8 +21,9 @@ include("Interpolations/interpolation.jl")
 include("utils.jl")
 include("plots/plots.jl")
 
-# export init_annulus, closest_point, velocity_profile, interpolate_velocity, 
-#     bfm, bfm_gpu_new, plot_paths
+export Grid2D, R, BellmanFordMoore, Dijkstra, RadiusStepping, R
 
+export init_annulus, closest_point, velocity_profile, interpolate_velocity, 
+    bfm, bfm_gpu, plot_paths, LinearInterpolation, recontruct_path
 
-# end # module
+end # module
