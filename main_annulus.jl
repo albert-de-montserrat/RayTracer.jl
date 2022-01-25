@@ -1,10 +1,4 @@
-# using MAT
-# using TimerOutputs
-# include("src/ShortestPath.jl")
-
 import Pkg; Pkg.activate(".")
-# include("src/RayTracer.jl")
-
 using RayTracer
 
 # number of elements in the azimuthal and radial direction

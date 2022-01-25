@@ -32,14 +32,14 @@ end
 
 Π(n::NTuple{N, T}) where {N, T} = foldl(*, n)
 
-function grid(c0, c1, nnods, T::Type{LinearMesh})
+function grid(c0, c1, nnods)
     nels = nnods.-1
     
     x = collect(LinRange(c0[1], c1[1], nnods[1]))
     y = collect(LinRange(c0[2], c1[2], nnods[2]))
     z = collect(LinRange(c0[3], c1[3], nnods[3]))
     
-    Grid{T, eltype(c0), eltype(nels)}(
+    Grid{LinearMesh, eltype(c0), eltype(nels)}(
         c0,
         c1,
         nels,
@@ -90,7 +90,7 @@ end
 
 function getindex(gr::Grid, I::Int)
     # @assert I <= Π(gr.nnods)
-    i,j,k = CartesianIndex(gr, I)
+    i, j, k = CartesianIndex(gr, I)
     Point(gr.x[i], gr.y[j], gr.z[k])
 end
 
