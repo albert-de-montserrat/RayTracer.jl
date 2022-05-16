@@ -1,18 +1,12 @@
 abstract type AbstractSPM end
 
-struct BellmanFordMoore{T, M} <: AbstractSPM
-    prev::T
-    dist::M
-end
-
-struct Dijkstra{T, M} <: AbstractSPM
-    prev::T
-    dist::M
-end
-
-struct RadiusStepping{T, M} <: AbstractSPM
-    prev::T
-    dist::M
+for algorithm in (:BellmanFordMoore, :Dijkstra, :RadiusStepping)
+    @eval begin
+        struct $(algorithm){T, M} <: AbstractSPM
+            prev::T
+            dist::M
+        end
+    end
 end
 
 Base.getindex(spm::AbstractSPM) = spm.prev
