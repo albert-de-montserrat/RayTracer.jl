@@ -60,17 +60,17 @@ end
 
 function init_halo_path!(p, halo)
     n = length(halo) ÷ 2
-    @inbounds for i in 1:n
+    Threads.@threads for i in 1:n
         p[halo[i, 2]] = halo[i,1]
         p[halo[i, 1]] = halo[i,2]
     end
 end
 
-sp_column(A::SparseMatrixCSC, I::Integer)  = @views A.rowval[nzrange(A, I)]
+@inline sp_column(A::SparseMatrixCSC, I::Integer)  = @views A.rowval[nzrange(A, I)]
 
 function init_Q!(Q::BitVector, G::SparseMatrixCSC{Bool, Int64}, e2n::Dict, source::Integer)
-    for element in sp_column(G, source)
-        for i in e2n[element]
+    Threads.@threads for element in sp_column(G, source)
+        @simd for i in e2n[element]
             Q[i] = true
         end
     end
@@ -86,7 +86,7 @@ function update_Q!(Q::BitVector, G::SparseMatrixCSC, dist, dist0, e2n)
                 for i in e2n[element]
                     # this line removes redundance and cuts 
                     # down the time of the function by ~half
-                    Q[i] == true && continue
+                    Q[i] === true && continue
                     Q[i] = true
                 end
             end
@@ -129,7 +129,7 @@ end
             tail_idx = (head_idx==1) + 1
             # temptative distance (ignore if it's ∞)
             δ = ifelse(
-                dGi == typemax,
+                dGi === typemax(T),
                 typemax(T),
                 muladd(2, distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx]), dGi)
                 # dGi + 2*distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx])
@@ -152,20 +152,26 @@ end
    
     # read coordinates, velocity and distance of frontier node
     di = dist0[i]
-    xi, zi = x[i], z[i]
+    point = (x[i], z[i])
     Ui = U[i]
-    
+    _inf = typemax(T)
     # iterate over adjacent nodes to find the the one with 
     # the mininum distance to current node
     for j in  sp_column(G, i), Gi in e2n[j] 
         dGi = dist0[Gi]
         # temptative distance (ignore if it's ∞)
-        δ = ifelse(
-            dGi == typemax,
-            typemax(T),
-            muladd(2, distance(xi, zi, x[Gi], z[Gi])/(Ui+U[Gi]), dGi)
-            # dGi + 2*distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx])
-        )
+        # δ = ifelse(
+        #     dGi === typemax(T),
+        #     typemax(T),
+        #     # muladd(2.0, distance(xi, zi, x[Gi], z[Gi])/(Ui+U[Gi]), dGi)
+        #     dGi + 2.0*distance(xi, zi, x[Gi], z[Gi])/(Ui+U[Gi])
+        # )
+
+        δ = if dGi === _inf
+            _inf
+        else
+            dGi + 2.0*distance(point, (x[Gi], z[Gi]))/(Ui+U[Gi])
+        end
 
         # update distance and predecessor index if
         # it's smaller than the temptative distance
