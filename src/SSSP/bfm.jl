@@ -1,4 +1,6 @@
-function bfm(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Integer, gr, U::AbstractArray{T}) where {M,T}
+function bfm(
+    G::SparseMatrixCSC{Bool,M}, halo::Matrix, source::Integer, gr, U::AbstractArray{T}
+) where {M,T}
 
     # unpack coordinates
     (; e2n, x, z, r) = gr
@@ -9,7 +11,7 @@ function bfm(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Integer, gr, U::
     # allocate dictionary containing best previous nodes
     p = Vector{M}(undef, n)
     init_halo_path!(p, halo)
-    
+
     # priority queue containing NOT settled nodes
     Q = falses(n)
     # 1st frontier nodes are nodes adjacent to the source
@@ -22,26 +24,26 @@ function bfm(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Integer, gr, U::
 
     # main loop
     it = 1
-    
+
     # covergence: if the queue is empty we are done
     @inbounds while sum(Q) != 0
         # relax edges (parallel process)
         relax!(dist, p, dist0, G, Q, e2n, x, z, r, U)
-             
+
         update_halo!(p, dist, dist0, halo)
-        
+
         # pop queue (serial-but-fast process)
         # fillfalse!(Q)
         fill!(Q, false)
 
         # update nodal queue (parallel process)
         update_Q!(Q, G, dist, dist0, e2n)
-       
+
         # update old distance vector (TODO parallel version)
         copyto!(dist0, dist)
 
         # update iteration counter
-        it+=1
+        it += 1
     end
 
     println("Converged in $it iterations")
@@ -50,10 +52,11 @@ function bfm(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Integer, gr, U::
 end
 
 function update_halo!(p, dist, dist0, halo)
-    Threads.@threads for i in axes(halo,1)
-        @inbounds if (dist[halo[i,1]] < dist0[halo[i,1]]) && (dist[halo[i,2]] > dist[halo[i,1]])
-            dist[halo[i,2]] = dist[halo[i,1]]
-            p[halo[i,2]] = p[halo[i,1]]
+    Threads.@threads for i in axes(halo, 1)
+        @inbounds if (dist[halo[i, 1]] < dist0[halo[i, 1]]) &&
+            (dist[halo[i, 2]] > dist[halo[i, 1]])
+            dist[halo[i, 2]] = dist[halo[i, 1]]
+            p[halo[i, 2]] = p[halo[i, 1]]
         end
     end
 end
@@ -61,14 +64,14 @@ end
 function init_halo_path!(p, halo)
     n = length(halo) ÷ 2
     Threads.@threads for i in 1:n
-        p[halo[i, 2]] = halo[i,1]
-        p[halo[i, 1]] = halo[i,2]
+        p[halo[i, 2]] = halo[i, 1]
+        p[halo[i, 1]] = halo[i, 2]
     end
 end
 
-@inline sp_column(A::SparseMatrixCSC, I::Integer)  = @views A.rowval[nzrange(A, I)]
+@inline sp_column(A::SparseMatrixCSC, I::Integer) = @views A.rowval[nzrange(A, I)]
 
-function init_Q!(Q::BitVector, G::SparseMatrixCSC{Bool, Int64}, e2n::Dict, source::Integer)
+function init_Q!(Q::BitVector, G::SparseMatrixCSC{Bool,Int64}, e2n::Dict, source::Integer)
     Threads.@threads for element in sp_column(G, source)
         @simd for i in e2n[element]
             Q[i] = true
@@ -94,8 +97,9 @@ function update_Q!(Q::BitVector, G::SparseMatrixCSC, dist, dist0, e2n)
     end
 end
 
-
-@inbounds function relax!(dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::BitVector, e2n, x, z, r, U) where T
+@inbounds function relax!(
+    dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::BitVector, e2n, x, z, r, U
+) where {T}
     # iterate over queue. Unfortunately @threads can't iterate 
     # over a Set, so we need to collect() it. This yields an 
     # allocation, but it's worth it in this case as it saves 
@@ -103,11 +107,13 @@ end
     # of branching
     Threads.@threads for i in findall(Q)
         _relax!(p, dist, dist0, G, i, e2n, x, z, r, U)
-    end 
+    end
 end
 
-@inbounds function _relax!(p::Vector, dist, dist0, G::SparseMatrixCSC, i, e2n, x, z, r, U::Matrix{T}) where T
-   
+@inbounds function _relax!(
+    p::Vector, dist, dist0, G::SparseMatrixCSC, i, e2n, x, z, r, U::Matrix{T}
+) where {T}
+
     # read coordinates, velocity and distance of frontier node
     di = dist0[i]
     xi, zi, ri = x[i], z[i], r[i]
@@ -115,10 +121,10 @@ end
 
     # queue to track redundant operations
     redundancyQ = Set{Int32}()
-    
+
     # iterate over adjacent nodes to find the the one with 
     # the mininum distance to current node
-    for j in  sp_column(G, i),  Gi in e2n[j]
+    for j in sp_column(G, i), Gi in e2n[j]
         if Gi ∉ redundancyQ
             push!(redundancyQ, Gi)
             dGi = dist0[Gi]
@@ -126,12 +132,16 @@ end
             # branch-free arithmetic to check whether ray is coming from above or below
             # idx = 1 if ray is going downards, = 2 if going upwards
             head_idx = (ri > r[Gi]) + 1
-            tail_idx = (head_idx==1) + 1
+            tail_idx = (head_idx == 1) + 1
             # temptative distance (ignore if it's ∞)
             δ = ifelse(
                 dGi === typemax(T),
                 typemax(T),
-                muladd(2, distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx]), dGi)
+                muladd(
+                    2,
+                    distance(xi, zi, x[Gi], z[Gi]) / (Ui[tail_idx] + U[Gi, head_idx]),
+                    dGi,
+                ),
                 # dGi + 2*distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx])
             )
 
@@ -145,11 +155,13 @@ end
     end
 
     # update distance
-    dist[i] = di 
+    return dist[i] = di
 end
 
-@inbounds function _relax!(p::Vector, dist, dist0, G::SparseMatrixCSC, i, e2n, x, z, r, U::Vector{T}) where T
-   
+@inbounds function _relax!(
+    p::Vector, dist, dist0, G::SparseMatrixCSC, i, e2n, x, z, r, U::Vector{T}
+) where {T}
+
     # read coordinates, velocity and distance of frontier node
     di = dist0[i]
     point = (x[i], z[i])
@@ -157,7 +169,7 @@ end
     _inf = typemax(T)
     # iterate over adjacent nodes to find the the one with 
     # the mininum distance to current node
-    for j in  sp_column(G, i), Gi in e2n[j] 
+    for j in sp_column(G, i), Gi in e2n[j]
         dGi = dist0[Gi]
         # temptative distance (ignore if it's ∞)
         # δ = ifelse(
@@ -170,7 +182,7 @@ end
         δ = if dGi === _inf
             _inf
         else
-            dGi + 2.0*distance(point, (x[Gi], z[Gi]))/(Ui+U[Gi])
+            dGi + 2.0 * distance(point, (x[Gi], z[Gi])) / (Ui + U[Gi])
         end
 
         # update distance and predecessor index if
@@ -194,26 +206,37 @@ end
     end
 
     # update distance
-    dist[i] = di 
+    return dist[i] = di
 end
 
-@inbounds function _relax!(p::Vector, dist, dist0, G::SparseMatrixCSC, i, e2n, x, z, r, interpolant::Interpolations.Extrapolation) 
-   
+@inbounds function _relax!(
+    p::Vector,
+    dist,
+    dist0,
+    G::SparseMatrixCSC,
+    i,
+    e2n,
+    x,
+    z,
+    r,
+    interpolant::Interpolations.Extrapolation,
+)
+
     # read coordinates, velocity and distance of frontier node
     di = dist0[i]
     xi, zi = x[i], z[i]
     ri = r[i]
     # Ui = U[i]
-    
+
     # iterate over adjacent nodes to find the the one with 
     # the mininum distance to current node
-    for j in  sp_column(G, i), Gi in e2n[j] 
+    for j in sp_column(G, i), Gi in e2n[j]
         dGi = dist0[Gi]
         # temptative distance (ignore if it's ∞)
         δ = ifelse(
             dGi == typemax,
             typemax(T),
-            dGi + distance(xi, zi, x[Gi], z[Gi])/interpolant(0.5*(ri+r[Gi]))
+            dGi + distance(xi, zi, x[Gi], z[Gi]) / interpolant(0.5 * (ri + r[Gi])),
             # muladd(2, distance(xi, zi, x[Gi], z[Gi])/(Ui+U[Gi]), dGi)
             # dGi + 2*distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx])
         )
@@ -239,11 +262,12 @@ end
     end
 
     # update distance
-    dist[i] = di 
+    return dist[i] = di
 end
 
-
-function bfmtest_bench(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T}) where {M,T}
+function bfmtest_bench(
+    G::SparseMatrixCSC{Bool,M}, source::Int, gr, U::Matrix{T}
+) where {M,T}
 
     # unpack coordinates
     (; e2n, x, z, r) = gr
@@ -267,31 +291,30 @@ function bfmtest_bench(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T
 
     # main loop
     it = 1
-    
+
     # covergence: if the queue is empty we are done
     @inbounds while sum(Q) != 0
-        
+
         # relax edges (parallel process)
         relax!(dist, p, dist0, G, Q, e2n, x, z, r, U)
-                  
+
         # pop queue (serial-but-fast process)
         fillfalse!(Q)
 
         # update nodal queue (parallel process)
         update_Q!(Q, G, dist, dist0, e2n)
-        
+
         # update old distance vector (TODO parallel version)
         copyto!(dist0, dist)
 
         # update iteration counter
-        it+=1
+        it += 1
     end
 
     println("Converged in $it iterations")
 
     return to
 end
-
 
 # function bfmtest_bench(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Int, gr, U::AbstractArray{T}) where {M,T}
 
@@ -304,7 +327,7 @@ end
 #     # allocate dictionary containing best previous nodes
 #     p = Vector{M}(undef, n)
 #     init_halo_path!(p, halo)
-    
+
 #     # priority queue containing NOT settled nodes
 #     Q = falses(n)
 #     # 1st frontier nodes are nodes adjacent to the source
@@ -323,9 +346,9 @@ end
 #         # relax edges (parallel process)
 #         @timeit to "relax"  relax!(dist, p, dist0, G, Q, e2n, x, z, r, U)
 #         # @btime relax!($dist, $p, $dist0, $G, $Q, $e2n, $x, $z, $r, $U)
-            
+
 #         @timeit to "halo"  update_halo!(dist, dist0, halo)
-        
+
 #         # pop queue (serial-but-fast process)
 #         @timeit to "fill"  fillfalse!(Q)
 

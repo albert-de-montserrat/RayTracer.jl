@@ -1,23 +1,19 @@
 @inbounds function bilinear(vc, pc, vu)
-   
-    z1, z2 = vc[1].z, vc[4].z 
-    x1, x2 = vc[1].x, vc[2].x 
-    (x2-x1 > π) && (x1 += 2π)
-    Δx21 = x2   - x1 
-    Δz21 = z2   - z1 
-    Δx2  = x2   - pc.x 
-    Δx1  = pc.x - x1 
-    Δz2  = z2   - pc.z 
-    Δz1  = pc.z - z1
+    z1, z2 = vc[1].z, vc[4].z
+    x1, x2 = vc[1].x, vc[2].x
+    (x2 - x1 > π) && (x1 += 2π)
+    Δx21 = x2 - x1
+    Δz21 = z2 - z1
+    Δx2 = x2 - pc.x
+    Δx1 = pc.x - x1
+    Δz2 = z2 - pc.z
+    Δz1 = pc.z - z1
 
-    vn = @muladd 1/(Δx21*Δz21)*
-        (vu[1]*Δx2*Δz2 +
-         vu[2]*Δx1*Δz2 +
-         vu[4]*Δx2*Δz1 +
-         vu[3]*Δx1*Δz1)
+    vn = @muladd 1 / (Δx21 * Δz21) * (
+        vu[1] * Δx2 * Δz2 + vu[2] * Δx1 * Δz2 + vu[4] * Δx2 * Δz1 + vu[3] * Δx1 * Δz1
+    )
 
     return vn
-
 end
 
 function interpolation_quad!(V, gr, element)

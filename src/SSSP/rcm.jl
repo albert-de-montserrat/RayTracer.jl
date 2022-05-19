@@ -1,5 +1,4 @@
 
-
 function symrcm(adjgr::Dict, degrees::Vector{T}) where {T}
     # Initialization
     n = length(adjgr)
@@ -32,11 +31,13 @@ function symrcm(adjgr::Dict, degrees::Vector{T}) where {T}
             C = popfirst!(Q) # child to put into the result list
             inQ[C] = false # make note: it is not in the queue anymore
             if !inR[C]
-                push!(F, C); inR[C] = true
+                push!(F, C)
+                inR[C] = true
             end
             for i in adjgr[C] # add all adjacent nodes into the queue
                 if (!inR[i]) && (!inQ[i]) # contingent on not being in result/queue
-                    push!(Q, i); inQ[i] = true
+                    push!(Q, i)
+                    inQ[i] = true
                 end
             end
         end
@@ -49,16 +50,16 @@ function graph2sparse(G, F)
     # Convert it to sparse array (better for GPU)
     I, J, V = Int[], Int[], Bool[]
     for (i, Gi) in G
-         for Gj in Gi
+        for Gj in Gi
             push!(J, i) # nodes go along columns (CSC format)
             push!(I, tmp[F[Gj]])
             push!(V, true)
         end
     end
-    K = sparse(I, J, V)
+    return K = sparse(I, J, V)
 end
 
-function reorder!(gr, prm) where T
+function reorder!(gr, prm) where {T}
     gr.x .= gr.x[prm]
     gr.z .= gr.z[prm]
     gr.θ .= gr.θ[prm]
@@ -67,7 +68,7 @@ function reorder!(gr, prm) where T
     map = rordering_map(prm)
 
     # reorder connectivity
-    @inbounds for i in 1:gr.nel, j in 1:length(gr.e2n[i])
+    @inbounds for i in 1:(gr.nel), j in 1:length(gr.e2n[i])
         gr.e2n[i][j] = map[gr.e2n[i][j]]
     end
 
@@ -83,9 +84,9 @@ function reorder!(gr, prm) where T
     # end
 end
 
-function rordering_map(prm::Vector{T}) where T
+function rordering_map(prm::Vector{T}) where {T}
     n = length(prm)
-    map = Dict{T, T}()
+    map = Dict{T,T}()
     for i in 1:n
         map[prm[i]] = i
     end

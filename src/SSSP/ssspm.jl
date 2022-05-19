@@ -2,7 +2,7 @@ abstract type AbstractSPM end
 
 for algorithm in (:BellmanFordMoore, :Dijkstra, :RadiusStepping)
     @eval begin
-        struct $(algorithm){T, M} <: AbstractSPM
+        struct $(algorithm){T,M} <: AbstractSPM
             prev::T
             dist::M
         end

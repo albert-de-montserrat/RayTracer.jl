@@ -1,11 +1,11 @@
 # wave direction 
 function directions(nlayers)
-    nmax = 2nlayers-1
-    ray_direction = Dict{Int, NTuple{2, Symbol}}()
+    nmax = 2nlayers - 1
+    ray_direction = Dict{Int,NTuple{2,Symbol}}()
     ray_direction[1] = ray_direction[nmax] = (:above, :above)
-    for i in 2:nlayers-1
+    for i in 2:(nlayers - 1)
         # For convinience, the put first the boundary where the SSSP is going to be restarted
-        ray_direction[i] = ray_direction[nmax-i+1] = (:below, :above)
+        ray_direction[i] = ray_direction[nmax - i + 1] = (:below, :above)
         # ray_direction[i] = ray_direction[nmax-i+1] = (:above, :below)
         # ray_direction[nmax-i+1] = (:below, :above)
     end
@@ -13,21 +13,27 @@ function directions(nlayers)
     return ray_direction
 end
 
-function boundary_velocity!(U, interpolant::Interpolations.Extrapolation, r_boundary, boundary_nodes, ray_direction)
+function boundary_velocity!(
+    U, interpolant::Interpolations.Extrapolation, r_boundary, boundary_nodes, ray_direction
+)
     buffer_zone = 1 # in km
     # Uboundary = ray_direction == :above ? interpolant(r_boundary + buffer_zone) : interpolant(r_boundary - buffer_zone)
-    Uboundary = ray_direction == :above ? interpolant(r_boundary - buffer_zone) : interpolant(r_boundary + buffer_zone)
+    Uboundary = if ray_direction == :above
+        interpolant(r_boundary - buffer_zone)
+    else
+        interpolant(r_boundary + buffer_zone)
+    end
     U[boundary_nodes] .= Uboundary
     return U
 end
 
 function bfm_multiphase(
-    Gsp::SparseMatrixCSC, 
-    source::Int, 
-    gr, 
-    U::Vector{T}, 
+    Gsp::SparseMatrixCSC,
+    source::Int,
+    gr,
+    U::Vector{T},
     partition::GridPartition,
-    interpolant
+    interpolant,
 ) where {T}
 
     # unpack partition
@@ -39,10 +45,15 @@ function bfm_multiphase(
     boundaries = partition.boundaries
     iterator = partition.iterator
 
-    boundary_dict = Dict(a => b for (a,b) in zip( partition.boundaries,  partition.rboundaries))
+    boundary_dict = Dict(
+        a => b for (a, b) in zip(partition.boundaries, partition.rboundaries)
+    )
 
     # find ids of boundary nodes
-    boundary_nodes =  Dict(a => findall(round.(gr.r, digits=2) .== b)  for (a,b) in zip( partition.boundaries,  partition.rboundaries))
+    boundary_nodes = Dict(
+        a => findall(round.(gr.r, digits=2) .== b) for
+        (a, b) in zip(partition.boundaries, partition.rboundaries)
+    )
 
     # wether to take the velocity just above or below the discontinuity
     ray_direction = directions(nlayers)
@@ -68,19 +79,24 @@ function bfm_multiphase(
     # end
 
     # initialise all distances as infinity and zero at the source node 
-    dist = fill(typemax(T), n) 
+    dist = fill(typemax(T), n)
     dist[source] = zero(T)
     dist0 = deepcopy(dist)
 
     # forward loop
     for i in 1:3 #length(iterator)
-
         current_level = iterator[i]
-        current_boundary = length(current_level) == 2 ? tuple(current_level[2]) : tuple(current_level[2], current_level[3])
+        current_boundary = if length(current_level) == 2
+            tuple(current_level[2])
+        else
+            tuple(current_level[2], current_level[3])
+        end
 
         # update velocity at current boundaries
         for j in current_boundary
-            boundary_velocity!(U, interpolant, boundary_dict[j], boundary_nodes[j], ray_direction[i]) 
+            boundary_velocity!(
+                U, interpolant, boundary_dict[j], boundary_nodes[j], ray_direction[i]
+            )
         end
 
         if i > 1
@@ -90,7 +106,7 @@ function bfm_multiphase(
             # if length(current_boundary) == 1 
             #     # @show current_boundary, i
             #     dist[setdiff(1:gr.nnods, boundary_nodes[current_boundary[1]])] .= typemax(T)
-                
+
             # else
             #     # @show current_boundary, i
             #     # ikeep = ifelse(
@@ -102,14 +118,14 @@ function bfm_multiphase(
             #     dist[setdiff(1:gr.nnods,ikeep)] .= typemax(T)
             # end
             # dist[setdiff(1:gr.nnods, boundary_nodes[current_boundary[1]])] .= typemax(T)
-            
+
         end
 
         @inbounds for Gi in @views Gsp.rowval[nzrange(Gsp, source)]
-            ID[Gi] ∉ current_level && continue 
+            ID[Gi] ∉ current_level && continue
             Q[Gi] = true
         end
-        
+
         # covergence: if the queue is empty we are done
         it = 0
         while sum(Q) != 0
@@ -118,7 +134,7 @@ function bfm_multiphase(
 
             # relax edges (parallel process)
             _relax_bfm!(dist, p, dist0, Gsp, Q, x, z, U)
-                
+
             # pop queue 
             fillfalse!(Q)
 
@@ -132,7 +148,6 @@ function bfm_multiphase(
         println("Level $i converged in $it iterations")
         # pop queue 
         fillfalse!(Q)
-
     end
 
     # println("Total $it iterations")
@@ -140,7 +155,7 @@ function bfm_multiphase(
     return BellmanFordMoore(p, dist)
 end
 
-function find_new_source_min(dist::Vector{T}, ID, boundary) where T
+function find_new_source_min(dist::Vector{T}, ID, boundary) where {T}
     di = typemax(T)
     idx = -1
     for i in eachindex(dist)
@@ -154,7 +169,7 @@ function find_new_source_min(dist::Vector{T}, ID, boundary) where T
     return idx
 end
 
-function find_new_source_max(dist::Vector{T}, ID, boundary) where T
+function find_new_source_max(dist::Vector{T}, ID, boundary) where {T}
     di = typemax(T)
     idx = -1
     for i in eachindex(dist)
@@ -168,7 +183,9 @@ function find_new_source_max(dist::Vector{T}, ID, boundary) where T
     return idx
 end
 
-function _update_Q!(Q::BitVector, G::SparseMatrixCSC, dist, dist0, ID, current_level::NTuple)
+function _update_Q!(
+    Q::BitVector, G::SparseMatrixCSC, dist, dist0, ID, current_level::NTuple
+)
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes

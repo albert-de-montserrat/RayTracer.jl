@@ -34,10 +34,10 @@ include("SSSP/bfm_new.jl")
 include("SSSP/rcm.jl")
 include("Interpolations/interpolation.jl")
 include("plots/plots.jl")
- 
+
 const R = 6371.0
 
-function travel_times(D, gr, receivers; isave = false, flname = "")
+function travel_times(D, gr, receivers; isave=false, flname="")
     travel_time = zeros(length(receivers))
     for (i, receiver) in enumerate(receivers)
         travel_time[i] = D.dist[receiver]
@@ -45,10 +45,9 @@ function travel_times(D, gr, receivers; isave = false, flname = "")
 
     if isave
         θ = rad2deg.(gr.θ[receivers])
-        df = DataFrame(degree=θ, travel_time = travel_time)
-        CSV.write(joinpath(pwd(),flname),df)
+        df = DataFrame(; degree=θ, travel_time=travel_time)
+        CSV.write(joinpath(pwd(), flname), df)
     end
-
 end
 
 struct VelProfile{T}
@@ -58,25 +57,27 @@ struct VelProfile{T}
 end
 
 function velocity_profile()
-    fl = Float32.(readdlm(joinpath(pwd(),"VelocityProfiles/R_Vp_Vs_AK135.txt")))
-    depth = fl[:,1]
+    fl = Float32.(readdlm(joinpath(pwd(), "VelocityProfiles/R_Vp_Vs_AK135.txt")))
+    depth = fl[:, 1]
     # convert depth -> radius
     r = maximum(depth) .- depth
     # bundle everything together
-    return VelProfile(reverse(r), reverse(fl[:,2]), reverse(fl[:,3]))
+    return VelProfile(reverse(r), reverse(fl[:, 2]), reverse(fl[:, 3]))
 end
 
-function layers2plot(; npoints = 180)
-    r = R.-(20f0, 35f0, 210f0, 410f0, 660f0, 2740f0, 2891.5f0, 5100f0)
-    layers = [circle(npoints, r, pop_end = false) for r in r]
+function layers2plot(; npoints=180)
+    r = R .- (20.0f0, 35.0f0, 210.0f0, 410.0f0, 660.0f0, 2740.0f0, 2891.5f0, 5100.0f0)
+    layers = [circle(npoints, r; pop_end=false) for r in r]
     return layers
 end
 
-function interpolate_velocity(r, interpolant::T; buffer = 1) where T<:Interpolations.Extrapolation
-    rlayer = R.-(20f0, 35f0, 210f0, 410f0, 660f0, 2740f0, 2891.5f0)
+function interpolate_velocity(
+    r, interpolant::T; buffer=1
+) where {T<:Interpolations.Extrapolation}
+    rlayer = R .- (20.0f0, 35.0f0, 210.0f0, 410.0f0, 660.0f0, 2740.0f0, 2891.5f0)
     V = similar(r)
     buffer_zone = buffer # in km
-    for i in eachindex(r)  
+    for i in eachindex(r)
         if r[i] ∈ rlayer
             # V[i] = 0.5*(interpolant(r[i]+buffer_zone) + interpolant(r[i]-buffer_zone))
             # V[i] = max(interpolant(r[i]+buffer_zone), interpolant(r[i]-buffer_zone))
@@ -93,11 +94,11 @@ struct DualVelocity{T}
     below::T
 end
 
-function dual_velocity(r, interpolant::T; buffer = 1) where T<:Interpolations.Extrapolation
-    rlayer = R.-(20f0, 35f0, 210f0, 410f0, 660f0, 2740f0, 2891.5f0)
+function dual_velocity(r, interpolant::T; buffer=1) where {T<:Interpolations.Extrapolation}
+    rlayer = R .- (20.0f0, 35.0f0, 210.0f0, 410.0f0, 660.0f0, 2740.0f0, 2891.5f0)
     V = Matrix{Float64}(undef, length(r), 2)
     buffer_zone = buffer # in km
-    for i in eachindex(r)  
+    for i in eachindex(r)
         @inbounds if r[i] ∈ rlayer
             # V[i] = 0.5*(interpolant(r[i]+buffer_zone) + interpolant(r[i]-buffer_zone))
             # V[i] = max(interpolant(r[i]+buffer_zone), interpolant(r[i]-buffer_zone))

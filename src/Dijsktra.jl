@@ -1,9 +1,9 @@
-struct Dijsktra{T, M}
-    prev::Dict{T, T}
+struct Dijsktra{T,M}
+    prev::Dict{T,T}
     dist::M
 end
 
-struct CuDijsktra{T, M}
+struct CuDijsktra{T,M}
     prev::T
     dist::M
 end
@@ -24,10 +24,9 @@ end
 const ∞ = Inf
 
 function dijsktra(G, source, gr, U, fw::Function)
-
     n = length(G)
     # p = fill(source, n) # best previous nodes
-    p = Dict{Int, Int}() # best previous nodes
+    p = Dict{Int,Int}() # best previous nodes
     dist = fill(Inf, n) # distance from best previous node
     dist[source] = 0
     # dist = [fw(gr[source], gr[i]) for i in 1:n]
@@ -42,7 +41,7 @@ function dijsktra(G, source, gr, U, fw::Function)
         di = dist[Qi]
         for i in G[Qi]
             i ∈ visited && continue # skips lines below if i ∈ visited = true
-            tmp_distance = di + fw(gri, gr[i])/abs(U[i]+Ui)*0.5
+            tmp_distance = di + fw(gri, gr[i]) / abs(U[i] + Ui) * 0.5
             if tmp_distance < dist[i]
                 p[i] = Qi
                 dist[i] = tmp_distance
@@ -51,7 +50,7 @@ function dijsktra(G, source, gr, U, fw::Function)
         end
         delete!(Q, Qi)
         push!(visited, Qi)
-        nit+=1
+        nit += 1
     end
 
     return Dijsktra(p, dist)
@@ -102,9 +101,8 @@ function recontruct_forward_path(D, source, target)
 end
 
 function dijsktra_parallel(G, source, gr, U, fw::Function)
-
     n = length(G)
-    p = Dict{Int, Int}() # best previous nodes
+    p = Dict{Int,Int}() # best previous nodes
     dist = fill(∞, n) # distance from best previous node
     dist[source] = 0
     # dist = [fw(gr[source], gr[i]) for i in 1:n]
@@ -119,9 +117,9 @@ function dijsktra_parallel(G, source, gr, U, fw::Function)
         relaxation!(Q, F, G, dist, p, gr, U, fw)
         Δ = min_distance(Q, dist) # threaded version only worth it for very large problems
         update!(F, Q, dist, Δ)
-        it+=1
+        it += 1
     end
-    
+
     println("Converged in $it iterations")
 
     return Dijsktra(p, dist)
@@ -140,7 +138,7 @@ end
 function _update!(F, Q, dist, Δ)
     F = false
     b = (Q == true) && (dist ≤ Δ)
-    b && (Q = false) && (F = true)
+    return b && (Q = false) && (F = true)
     # return F, Q
 end
 
@@ -149,7 +147,7 @@ function relaxation!(Q, F, G, dist, p, gr, U, fw::Function)
         @inbounds if F[i]
             for j in G[i]
                 Q[j] != true && continue
-                tmp_dist = dist[i] + fw(gr[i], gr[j])/abs(U[j]+U[i])*0.5
+                tmp_dist = dist[i] + fw(gr[i], gr[j]) / abs(U[j] + U[i]) * 0.5
                 if dist[j] > tmp_dist
                     dist[j] = tmp_dist
                     p[j] = i
@@ -172,13 +170,13 @@ function min_distance(Q::Vector, dist::Vector)
     return d
 end
 
-function min_distancet(Q::Vector, dist::Vector{T}) where T
+function min_distancet(Q::Vector, dist::Vector{T}) where {T}
     nt = Threads.nthreads()
     d = fill(Inf, nt)
     n = length(Q)
-    blockDim = floor(Int, n/nt)
+    blockDim = floor(Int, n / nt)
     left = collect(1:blockDim:n) # should think a way to eliminate these allocations
-    right = left .+ (blockDim-1) # should think a way to eliminate these allocations
+    right = left .+ (blockDim - 1) # should think a way to eliminate these allocations
     right[end] = n
 
     @sync for ib in 1:nt
@@ -191,12 +189,12 @@ function min_distancet(Q::Vector, dist::Vector{T}) where T
             end
         end
     end
-    
+
     return minimum(d)
 end
 
 function _gpu_update!(F, Q, dist, Δ)
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     if index < length(F)
         F[index] = false
         if (Q[i] == true) && (dist[i] ≤ Δ)
@@ -204,12 +202,12 @@ function _gpu_update!(F, Q, dist, Δ)
             F[index] = true
         end
     end
-    return 
+    return nothing
 end
 
-function gpu_update!(F::CuArray{Bool}, Q::CuArray{Bool}, dist::CuArray{T}, Δ) where T
+function gpu_update!(F::CuArray{Bool}, Q::CuArray{Bool}, dist::CuArray{T}, Δ) where {T}
     nt = 512
-    numblocks = ceil(Int, length(F)/nt)
+    numblocks = ceil(Int, length(F) / nt)
     CUDA.@sync begin
         @cuda threads = nt blocks = numblocks _gpu_update!(F, Q, dist, Δ)
     end
@@ -219,13 +217,14 @@ function _gpu_relaxation!(Q, F, K, dist, n1, n2, x, z, U)
     index = blockIdx().x * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
     # index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-    for i = index:stride:length(F)
+    for i in index:stride:length(F)
         @inbounds if F[i]
             for j in n1[i]:n2[i]
                 if Q[K[j]]
                     CUDA.@atomic dist[j] = min(
                         dist[j],
-                        dist[i] + distance2D(x[i], z[i], x[j], z[j])*abs(U[j]-U[i])*0.5
+                        dist[i] +
+                        distance2D(x[i], z[i], x[j], z[j]) * abs(U[j] - U[i]) * 0.5,
                     )
                 end
             end
@@ -235,10 +234,12 @@ end
 
 function gpu_relaxation!(Qd, Fd, Kd, dd, id1, id2, xd, zd, Ud)
     nt = 256
-    numblocks = ceil(Int, (length(F) + nt -1)/nt)
+    numblocks = ceil(Int, (length(F) + nt - 1) / nt)
     # numblocks = ceil(Int, length(F)/nt)
     CUDA.@sync begin
-        @cuda threads = nt blocks = numblocks _gpu_relaxation!(Qd, Fd, Kd, dd, id1, id2, xd, zd, Ud)
+        @cuda threads = nt blocks = numblocks _gpu_relaxation!(
+            Qd, Fd, Kd, dd, id1, id2, xd, zd, Ud
+        )
     end
 end
 
@@ -246,22 +247,22 @@ function _gpu_min_distance!(Q, dist, out)
     nthreads = blockDim().x # threads available per block
     sdata = @cuDynamicSharedMem(Float64, nthreads) # set up shared memory cache for this current block
 
-    index = (blockIdx().x-1) * 2*blockDim().x + threadIdx().x
-    tid = threadIdx().x -1 # cache index 
+    index = (blockIdx().x - 1) * 2 * blockDim().x + threadIdx().x
+    tid = threadIdx().x - 1 # cache index 
     I = index + blockDim().x
 
     # TODO need to handle tail
 
     @inbounds d1::Float64 = Q[index] == true ? dist[index] : Inf
     @inbounds d2::Float64 = Q[I] == true ? dist[index] : Inf
-    @inbounds sdata[tid+1] = min(d1, d2)
-    
+    @inbounds sdata[tid + 1] = min(d1, d2)
+
     sync_threads() # synchronize and restart threads
-    
+
     i::Int = blockDim().x ÷ 2
     while i != 0 # somehow while is much faster here
         if tid < i
-            @inbounds sdata[tid+1] = min(sdata[tid+1], sdata[tid+i+1])
+            @inbounds sdata[tid + 1] = min(sdata[tid + 1], sdata[tid + i + 1])
         end
         sync_threads() # synchronize and restart threads
         i = i ÷ 2
@@ -271,27 +272,28 @@ function _gpu_min_distance!(Q, dist, out)
     # this block
     if tid == 1
         @inbounds out[blockIdx().x] = sdata[1]
-    end 
+    end
 
-    return 
+    return nothing
 end
 
-function gpu_min_distance(Q::CuArray{Bool}, dist::CuArray{T}) where T
+function gpu_min_distance(Q::CuArray{Bool}, dist::CuArray{T}) where {T}
     nt = 256
-    numblocks = ceil(Int, length(Q)/nt/2)
+    numblocks = ceil(Int, length(Q) / nt / 2)
     smem = nt * sizeof(Float64) # shared memory per block
     out = CUDA.zeros(Float64, numblocks)
     CUDA.@sync begin
-        @cuda threads = Int(nt) blocks = Int(numblocks) shmem = smem _gpu_min_distance!(Q, dist, out)
+        @cuda threads = Int(nt) blocks = Int(numblocks) shmem = smem _gpu_min_distance!(
+            Q, dist, out
+        )
     end
     out = Array(out) # bring back to CPU
     return minimum(out) # do last reduction in the CPU (make custom function)
 end
 
-function BFM(G::Dict{Int64, Set{Int64}}, source, gr, U, fw::Function)
-
+function BFM(G::Dict{Int64,Set{Int64}}, source, gr, U, fw::Function)
     n = length(G)
-    p = Dict{Int, Int}() # best previous nodes
+    p = Dict{Int,Int}() # best previous nodes
     # p = zeros(Int, n) # best previous nodes
     dist = fill(∞, n) # distance from best forward node
     dist[source] = 0
@@ -308,8 +310,7 @@ function BFM(G::Dict{Int64, Set{Int64}}, source, gr, U, fw::Function)
     union!(active, G[source])
 
     while it < n
-
-        foo!(dist, p, dist0, G, active, gr, U, fw) 
+        foo!(dist, p, dist0, G, active, gr, U, fw)
         empty!(active)
         goo!(active, G, dist, dist0)
         if isempty(active)
@@ -327,21 +328,21 @@ function BFM(G::Dict{Int64, Set{Int64}}, source, gr, U, fw::Function)
         # end
 
         copyto!(dist0, dist)
-        it+=1
+        it += 1
     end
 
     # converged = relaxation_BFM!(Q, F, G, dist, p, gr, U, fw)
-        # if converged # or sum(Q) == 0
-        #     break
-        # end
-        # update!(F, Q)
-        # fill!(Q, false)
-        # it+=1
+    # if converged # or sum(Q) == 0
+    #     break
+    # end
+    # update!(F, Q)
+    # fill!(Q, false)
+    # it+=1
 
     return Dijsktra(p, dist)
 end
 
-function foo1!(dist::Vector{T}, p, dist0, G, F, gr, U, fw) where T
+function foo1!(dist::Vector{T}, p, dist0, G, F, gr, U, fw) where {T}
     # Threads.@threads 
     for iactive in 1:length(F)
         @inbounds if F[iactive]
@@ -350,14 +351,14 @@ function foo1!(dist::Vector{T}, p, dist0, G, F, gr, U, fw) where T
                 tmp_dist = ifelse(
                     dist0[Gi] == ∞,
                     ∞,
-                    dist0[Gi] + fw(gr[Gi], gr[iactive])*abs(U[Gi]-U[iactive])*0.5
+                    dist0[Gi] + fw(gr[Gi], gr[iactive]) * abs(U[Gi] - U[iactive]) * 0.5,
                 )
                 if di > tmp_dist
                     di = tmp_dist
                     p[iactive] = Gi
                 end
             end
-            dist[iactive] = di 
+            dist[iactive] = di
         end
     end
 end
@@ -372,29 +373,28 @@ function goo1!(active, G, dist, dist0)
     end
 end
 
-function foo!(dist::Vector{T}, p, dist0, G, active, gr, U, fw) where T
-    
+function foo!(dist::Vector{T}, p, dist0, G, active, gr, U, fw) where {T}
     Threads.@threads for iactive in collect(active)
         @inbounds di = dist0[iactive]
         @inbounds for Gi in (G[iactive])
             tmp_dist = ifelse(
                 dist0[Gi] == ∞,
                 ∞,
-                dist0[Gi] + fw(gr[Gi], gr[iactive])/abs(U[Gi]+U[iactive])*0.5
+                dist0[Gi] + fw(gr[Gi], gr[iactive]) / abs(U[Gi] + U[iactive]) * 0.5,
             )
             if di > tmp_dist
                 di = tmp_dist
                 p[iactive] = Gi
             end
         end
-        @inbounds dist[iactive] = di 
+        @inbounds dist[iactive] = di
     end
 end
 
 function goo!(active, G, dist, dist0)
     lk = ReentrantLock()
     for i in 1:length(G)
-         if dist[i] < dist0[i]
+        if dist[i] < dist0[i]
             lock(lk) do
                 union!(active, G[i])
             end
@@ -408,7 +408,7 @@ function relaxation_BFM!(Q, F, G, dist, p, gr, U, fw::Function)
         @inbounds if F[i]
             di = dist[i]
             for j in G[i]
-                tmp_dist = di + fw(gr[i], gr[j])*abs(U[j]-U[i])*0.5
+                tmp_dist = di + fw(gr[i], gr[j]) * abs(U[j] - U[i]) * 0.5
                 if dist[j] > tmp_dist
                     dist[j] = tmp_dist
                     p[j] = i
@@ -428,7 +428,7 @@ function relaxation_BFM2!(Q, dist, G, p, gr, U, fw::Function)
         Δdist = ∞
         index = -1
         for j in G[i]
-            tempative_add = fw(gr[i], gr[j])*abs(U[j]-U[i])*0.5
+            tempative_add = fw(gr[i], gr[j]) * abs(U[j] - U[i]) * 0.5
             if tempative_add < Δdist
                 Δdist = tempative_add
                 index = j
@@ -457,7 +457,6 @@ function min_distance(Q, dist)
 end
 
 function BFM(G_d::CuGraph, source, gr_d::CuMesh, fw::Function)
-
     G, n1, n2 = G_d.K, G_d.n1, G_d.n2 # unpack graph
     x, y, z = gr_d.x, gr_d.y, gr_d.z # unpack mesh arrays
     U = gr_d.U # field 
@@ -472,10 +471,7 @@ function BFM(G_d::CuGraph, source, gr_d::CuMesh, fw::Function)
     Q = CUDA.fill(false, n) # Settled nodes
 
     for _ in 1:length(G)
-        relaxation_BFM!(Q, F, G, dist, 
-                        n1, n2, x, y, z, 
-                        U, fw
-        )
+        relaxation_BFM!(Q, F, G, dist, n1, n2, x, y, z, U, fw)
         update!(F, Q)
         converged = false
         CUDA.fill!(Q, false)
@@ -485,19 +481,18 @@ function BFM(G_d::CuGraph, source, gr_d::CuMesh, fw::Function)
 end
 
 function _gpu_relaxation_BFM!(Q, F, K, dist, p, n1, n2, x, y, z, U, fw)
-
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     if index < length(F)
-
         if F[index]
-
             xi, yi, zi = x[index], y[index], z[index]
             ileft, iright = n1[index], n2[index]
 
             # TODO cache out xj yj zj ?
             for j in ileft:iright
                 if Q[K[j]]
-                    tmp_dist = dist[index] + fw(xi, yi, zi, x[j], y[j], z[j])*abs(U[j]-U[index])*0.5
+                    tmp_dist =
+                        dist[index] +
+                        fw(xi, yi, zi, x[j], y[j], z[j]) * abs(U[j] - U[index]) * 0.5
                     sync_threads()
                     if dist[j] > tmp_dist
                         dist[j] = tmp_dist
@@ -507,22 +502,31 @@ function _gpu_relaxation_BFM!(Q, F, K, dist, p, n1, n2, x, y, z, U, fw)
                     sync_threads()
                 end
             end
-
         end
     end
 
     return nothing
 end
 
-function relaxation_BFM!(Q::CuArray{Bool}, F::CuArray{Bool}, G::CuArray, dist::CuArray, 
-                        n1::CuArray, n2::CuArray, x::CuArray, y::CuArray, z::CuArray, 
-                        U::CuArray, fw::Function
-                        )
-    
+function relaxation_BFM!(
+    Q::CuArray{Bool},
+    F::CuArray{Bool},
+    G::CuArray,
+    dist::CuArray,
+    n1::CuArray,
+    n2::CuArray,
+    x::CuArray,
+    y::CuArray,
+    z::CuArray,
+    U::CuArray,
+    fw::Function,
+)
     nt = 256
-    numblocks = ceil(Int, length(F)/nt)
+    numblocks = ceil(Int, length(F) / nt)
     CUDA.@sync begin
-        @cuda threads = nt blocks = numblocks _gpu_relaxation_BFM!(Q, F, G, dist, p, n1, n2, x, y, z, U, fw)
+        @cuda threads = nt blocks = numblocks _gpu_relaxation_BFM!(
+            Q, F, G, dist, p, n1, n2, x, y, z, U, fw
+        )
     end
 end
 
@@ -537,7 +541,7 @@ function update!(F, Q)
 end
 
 function _gpu_update!(F, Q)
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     if index < length(F)
         F[index] = false
         if Q[index] == true
@@ -545,12 +549,12 @@ function _gpu_update!(F, Q)
             F[index] = true
         end
     end
-    return 
+    return nothing
 end
 
-function update!(F::CuArray{Bool}, Q::CuArray{Bool}) 
+function update!(F::CuArray{Bool}, Q::CuArray{Bool})
     nt = 256
-    numblocks = ceil(Int, length(F)/nt)
+    numblocks = ceil(Int, length(F) / nt)
     CUDA.@sync begin
         @cuda threads = nt blocks = numblocks _gpu_update!(F, Q)
     end
@@ -571,7 +575,7 @@ function move2device(K, U, gr)
     # indices of K corresponding to nodes connected to the i-th node
     nz1 = Vector{Int64}(undef, K.n)
     nz2 = similar(nz1)
-    @inbounds for j in 1:K.n
+    @inbounds for j in 1:(K.n)
         r = nzrange(K, j)
         a = min(r.start, r.stop) # indices can be inverted e.g. imax:imin
         b = max(r.start, r.stop) # indices can be inverted e.g. imax:imin
@@ -584,5 +588,4 @@ function move2device(K, U, gr)
     mesh_d = CuMesh(x_d, y_d, z_d, U_d)
 
     return graph_d, mesh_d
-
 end

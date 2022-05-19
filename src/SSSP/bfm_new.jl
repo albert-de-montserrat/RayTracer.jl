@@ -1,4 +1,4 @@
-function bfmtest(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T}) where {M,T}
+function bfmtest(G::SparseMatrixCSC{Bool,M}, source::Int, gr, U::Matrix{T}) where {M,T}
 
     # unpack coordinates
     (; e2n, x, z, r) = gr
@@ -24,11 +24,11 @@ function bfmtest(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T}) whe
     it = 1
     # covergence: if the queue is empty we are done
     @inbounds while sum(Q) != 0
-        
+
         # relax edges (parallel process)
         relax!(dist, p, dist0, G, Q, e2n, x, z, r, U)
         # @btime relax!($dist, $p, $dist0, $G, $Q, $e2n, $x, $z, $r, $U)
-            
+
         # pop queue (serial-but-fast process)
         fillfalse!(Q)
 
@@ -40,7 +40,7 @@ function bfmtest(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T}) whe
         copyto!(dist0, dist)
 
         # update iteration counter
-        it+=1
+        it += 1
     end
 
     println("Converged in $it iterations")
@@ -48,7 +48,9 @@ function bfmtest(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T}) whe
     return BellmanFordMoore(p, dist)
 end
 
-function bfmtest_bench(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T}) where {M,T}
+function bfmtest_bench(
+    G::SparseMatrixCSC{Bool,M}, source::Int, gr, U::Matrix{T}
+) where {M,T}
 
     # unpack coordinates
     (; e2n, x, z, r) = gr
@@ -75,11 +77,11 @@ function bfmtest_bench(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T
     to = TimerOutput()
     # covergence: if the queue is empty we are done
     @inbounds while sum(Q) != 0
-        
+
         # relax edges (parallel process)
         @timeit to "relax" relax!(dist, p, dist0, G, Q, e2n, x, z, r, U)
         # @btime relax!($dist, $p, $dist0, $G, $Q, $e2n, $x, $z, $r, $U)
-            
+
         # pop queue (serial-but-fast process)
         @timeit to "fill false" fillfalse!(Q)
 
@@ -91,7 +93,7 @@ function bfmtest_bench(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T
         @timeit to "copy dist" copyto!(dist0, dist)
 
         # update iteration counter
-        it+=1
+        it += 1
     end
 
     println("Converged in $it iterations")
@@ -99,10 +101,11 @@ function bfmtest_bench(G::SparseMatrixCSC{Bool, M}, source::Int, gr, U::Matrix{T
     return to
 end
 
+sp_colum(A::SparseMatrixCSC, I::T) where {T<:Integer} = @views A.rowval[nzrange(A, I)]
 
-sp_colum(A::SparseMatrixCSC, I::T) where T<:Integer = @views A.rowval[nzrange(A, I)]
-
-function init_Q!(Q::BitVector, G::SparseMatrixCSC{Bool, T}, e2n::Dict, source::Integer) where T
+function init_Q!(
+    Q::BitVector, G::SparseMatrixCSC{Bool,T}, e2n::Dict, source::Integer
+) where {T}
     for element in sp_colum(G, source)
         for i in e2n[element]
             Q[i] = true
@@ -127,7 +130,18 @@ function update_Q!(Q::BitVector, G::SparseMatrixCSC, dist, dist0, e2n)
     end
 end
 
-@inline function relax!(dist::Vector{T}, p::Vector, dist0, G::SparseMatrixCSC, Q::BitVector, e2n, x, z, r, U::Matrix) where T
+@inline function relax!(
+    dist::Vector{T},
+    p::Vector,
+    dist0,
+    G::SparseMatrixCSC,
+    Q::BitVector,
+    e2n,
+    x,
+    z,
+    r,
+    U::Matrix,
+) where {T}
     # iterate over queue. Unfortunately @threads can't iterate 
     # over a Set, so we need to collect() it. This yields an 
     # allocation, but it's worth it in this case as it saves 
@@ -141,39 +155,43 @@ end
 
 function adjacents!(tmp, G, idx, e2n)
     N = 0
-    indices =  sp_colum(G, idx)
+    indices = sp_colum(G, idx)
     @inbounds for j in indices
         for Gi in e2n[j]
-            if Gi ∉ view(tmp, 1:N+1)
-                N+=1
-                tmp[N+1] = Gi
+            if Gi ∉ view(tmp, 1:(N + 1))
+                N += 1
+                tmp[N + 1] = Gi
             end
         end
     end
-    tmp[1] = N
+    return tmp[1] = N
 end
 
-@inbounds function _relax!(p::Vector, dist, dist0, G::SparseMatrixCSC, i, e2n, x, z, r, U::Matrix{T}) where T
-   
+@inbounds function _relax!(
+    p::Vector, dist, dist0, G::SparseMatrixCSC, i, e2n, x, z, r, U::Matrix{T}
+) where {T}
+
     # read coordinates, velocity and distance of frontier node
     di = dist0[i]
     xi, zi, ri = x[i], z[i], r[i]
     Ui = (U[i, 1], U[i, 2])
-    
+
     # iterate over adjacent nodes to find the the one with 
     # the mininum distance to current node
-    for j in  sp_colum(G, i),  Gi in e2n[j] 
+    for j in sp_colum(G, i), Gi in e2n[j]
         dGi = dist0[Gi]
         # i is the index of the ray-tail, Gi index of ray-head
         # branch-free arithmetic to check whether ray is coming from above or below
         # idx = 1 if ray is going downards, = 2 if going upwards
         head_idx = (ri > r[Gi]) + 1
-        tail_idx = (head_idx==1) + 1
+        tail_idx = (head_idx == 1) + 1
         # temptative distance (ignore if it's ∞)
         δ = ifelse(
             dGi == typemax,
             typemax(T),
-            muladd(2, distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx]), dGi)
+            muladd(
+                2, distance(xi, zi, x[Gi], z[Gi]) / (Ui[tail_idx] + U[Gi, head_idx]), dGi
+            ),
             # dGi + 2*distance(xi, zi, x[Gi], z[Gi])/(Ui[tail_idx]+U[Gi, head_idx])
         )
 
@@ -186,5 +204,5 @@ end
     end
 
     # update distance
-    dist[i] = di 
+    return dist[i] = di
 end

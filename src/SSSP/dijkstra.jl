@@ -11,17 +11,17 @@ const ∞ = Inf
 function dijkstra(G::Dict, source::Int, ω)
 
     # number of nodes in the graph
-    n = length(G) 
+    n = length(G)
 
     # allocate dictionary containing best previous nodes
-    p = Dict{Int, Int}() 
+    p = Dict{Int,Int}()
 
     # initialise all distances as infinity and zero at the source node 
-    dist = fill(Inf, n) 
+    dist = fill(Inf, n)
     dist[source] = 0
 
     # priority queue containing NOT settled nodes
-    Q = Set{Int}() 
+    Q = Set{Int}()
     push!(Q, source) # frontier node is the source
 
     # settled nodes
@@ -29,16 +29,16 @@ function dijkstra(G::Dict, source::Int, ω)
 
     # body
     @inbounds while !isempty(Q)
-        
+
         # the frontier node is the one with the mininum distance
-        Qi = min_distance(Q, dist) 
+        Qi = min_distance(Q, dist)
 
         # relax nodes adjacent to the frontier
         for i in G[Qi]
 
             # skips lines below if i ∈ settled = true
-            i ∈ settled && continue 
-            
+            i ∈ settled && continue
+
             # temptative distance of successor
             δ = di + ω[i]
 
@@ -65,34 +65,34 @@ function dijkstra(G::Dict, source::Int, ω)
 end
 
 # specialized implementation for on-the-fly weights
-function dijkstra(G::Dict, source::Int, gr, U::Vector{T}) where T
+function dijkstra(G::Dict, source::Int, gr, U::Vector{T}) where {T}
 
     # number of nodes in the graph
-    n = length(G) 
+    n = length(G)
 
     # allocate dictionary containing best previous nodes
-    p = Dict{Int, Int}() 
+    p = Dict{Int,Int}()
 
     # initialise all distances as infinity and zero at the source node 
-    dist = fill(typemax(T), n) 
+    dist = fill(typemax(T), n)
     dist[source] = 0
 
     # priority queue containing NOT settled nodes
-    Q = Set{Int}() 
+    Q = Set{Int}()
     # frontier node is the source
     # note on Set: push!() is faster than union!() 
     # if we need to add a single value to the Set
     push!(Q, source)
 
     # settled nodes
-    settled = Set{Int}() 
+    settled = Set{Int}()
 
     # body
     it = 1
     @inbounds while !isempty(Q)
-        
+
         # the frontier node is the one with the mininum distance
-        Qi = min_distance(Q, dist) 
+        Qi = min_distance(Q, dist)
 
         # # cache coordinates, velocity and distance of frontier node
         # xi, zi, Ui, di = gr.x[Qi], gr.z[Qi], U[Qi], dist[Qi]
@@ -102,7 +102,7 @@ function dijkstra(G::Dict, source::Int, gr, U::Vector{T}) where T
 
         #     # skips lines below if i ∈ settled = true
         #     i ∈ settled && continue 
-            
+
         #     # temptative distance of successor
         #     δ = di + 2*distance(xi, zi, gr.x[i], gr.z[i])/abs(U[i]+Ui)
 
@@ -143,10 +143,10 @@ end
     for i in G[Qi]
 
         # skips lines below if i ∈ settled = true
-        i ∈ settled && continue 
-            
+        i ∈ settled && continue
+
         # temptative distance of successor
-        δ = di + 2*distance(xi, zi, gr.x[i], gr.z[i])/abs(U[i]+Ui)
+        δ = di + 2 * distance(xi, zi, gr.x[i], gr.z[i]) / abs(U[i] + Ui)
 
         # update distance if it's smaller than 
         # the temptative distance
@@ -158,11 +158,10 @@ end
             # push successor to the queuq
             push!(Q, i)
         end
-
     end
 end
 
-function min_distance(Q::Set{Int}, dist::Vector{T}) where T
+function min_distance(Q::Set{Int}, dist::Vector{T}) where {T}
     d = typemax(T) # ∞ of appropriate type
     idx = -1
 

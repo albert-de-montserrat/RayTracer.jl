@@ -10,12 +10,11 @@ function interpolate!(V, gr)
 
         if type[iel] == :Quad
             interpolation_quad!(V, gr, element)
-            
+
         elseif type[iel] == :Tri
             interpolation_triangle!(V, gr, element)
         end
     end
-
 end
 
 vertice(gr, el) = [gr[i] for i in el]

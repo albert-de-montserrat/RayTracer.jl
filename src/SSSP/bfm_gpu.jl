@@ -18,8 +18,7 @@ struct CuMesh2D{T}
     U::T
 end
 
-function e2n2gpu(e2n::Dict{T, Vector{T}}) where T
-
+function e2n2gpu(e2n::Dict{T,Vector{T}}) where {T}
     nonz = sum(length(e) for (_, e) in e2n)
     I, J, V = Vector{T}(undef, nonz), Vector{T}(undef, nonz), Vector{Bool}(undef, nonz)
     c = 0
@@ -32,19 +31,15 @@ function e2n2gpu(e2n::Dict{T, Vector{T}}) where T
         end
     end
 
-    S = CuSparseMatrixCSC(sparse(I, J, V))
-    
+    return S = CuSparseMatrixCSC(sparse(I, J, V))
 end
 
 function _gpu_relaxation_BFM!(Q, K, p, dist, dist0, n1, n2, x, z, U)
-
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     T = typemax(Float32)
 
     if index < length(Q)
-
         @inbounds if Q[index]
-
             di::Float64 = dist0[index]
             # xi::Float64, zi::Float64, Ui::Float64 = x[index], z[index], U[index]
             # TODO cache out xj yj zj ?
@@ -52,9 +47,10 @@ function _gpu_relaxation_BFM!(Q, K, p, dist, dist0, n1, n2, x, z, U)
                 Gi = K[i]
                 # temptative distance (ignore if it's ∞)
                 δ = ifelse(
-                   dist0[Gi] == T,
-                   T,
-                   dist0[Gi] + 2*distance(x[index], z[index], x[Gi], z[Gi])/(U[index]+U[Gi])
+                    dist0[Gi] == T,
+                    T,
+                    dist0[Gi] +
+                    2 * distance(x[index], z[index], x[Gi], z[Gi]) / (U[index] + U[Gi]),
                 )
                 # update distance and predecessor index 
                 # if it's smaller than the temptative distance
@@ -63,16 +59,23 @@ function _gpu_relaxation_BFM!(Q, K, p, dist, dist0, n1, n2, x, z, U)
                     p[index] = Gi
                 end
             end
-            
+
             # update distance
             dist[index] = di
         end
     end
 
-    return
+    return nothing
 end
 
-function relaxation_BFM!(Q::CuArray{Bool}, dist::CuArray, dist0::CuArray, p::CuArray, mesh_d::CuMesh2D, graph_d::CuGraph)
+function relaxation_BFM!(
+    Q::CuArray{Bool},
+    dist::CuArray,
+    dist0::CuArray,
+    p::CuArray,
+    mesh_d::CuMesh2D,
+    graph_d::CuGraph,
+)
     # unpack graph arrays
     K, n1, n2 = graph_d.K, graph_d.n1, graph_d.n2
 
@@ -80,10 +83,12 @@ function relaxation_BFM!(Q::CuArray{Bool}, dist::CuArray, dist0::CuArray, p::CuA
     x, z, U = mesh_d.x, mesh_d.z, mesh_d.U
 
     nt = 256
-    numblocks = ceil(Int, length(Q)/nt)
+    numblocks = ceil(Int, length(Q) / nt)
 
     CUDA.@sync begin
-        @cuda threads = nt blocks = numblocks _gpu_relaxation_BFM!(Q, K, p, dist, dist0, n1, n2, x, z, U)
+        @cuda threads = nt blocks = numblocks _gpu_relaxation_BFM!(
+            Q, K, p, dist, dist0, n1, n2, x, z, U
+        )
     end
 end
 
@@ -91,20 +96,16 @@ function _gpu_update_bfm!(Q, K, n1, n2, dist, dist0)
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     if index < length(Q)
-        
         @inbounds if dist[index] < dist0[index]
-            
             for i in n1[index]:n2[index]
                 Q[K[i]] = true
             end
-
         end
-
     end
 
-    return 
+    return nothing
 end
 
 function update_bfm!(Q::CuArray{Bool}, dist::CuArray, dist0::CuArray, graph_d::CuGraph)
@@ -112,7 +113,7 @@ function update_bfm!(Q::CuArray{Bool}, dist::CuArray, dist0::CuArray, graph_d::C
     K, n1, n2 = graph_d.K, graph_d.n1, graph_d.n2
 
     nt = 256
-    numblocks = ceil(Int, length(Q)/nt)
+    numblocks = ceil(Int, length(Q) / nt)
 
     CUDA.@sync begin
         @cuda threads = nt blocks = numblocks _gpu_update_bfm!(Q, K, n1, n2, dist, dist0)
@@ -125,7 +126,7 @@ function sparse2gpu(K::SparseMatrixCSC)
     # indices of K corresponding to nodes connected to the i-th node
     nz1 = Vector{Int32}(undef, K.n)
     nz2 = similar(nz1)
-    @inbounds for j in 1:K.n
+    @inbounds for j in 1:(K.n)
         r = nzrange(K, j)
         # a, b = extrema(r.start, r.stop) # indices can be inverted e.g. imax:imin
         a = min(r.start, r.stop) # indices can be inverted e.g. imax:imin
@@ -135,11 +136,10 @@ function sparse2gpu(K::SparseMatrixCSC)
     end
     n1_d, n2_d = CuArray(nz1), CuArray(nz2)
 
-    graph_d = CuGraph(K_d, n1_d, n2_d)
+    return graph_d = CuGraph(K_d, n1_d, n2_d)
 end
 
 function list2gpu(K::Dict)
-
     nonz = sum(length(e) for (_, e) in K)
     n = length(K)
     # Setup Graph arrays
@@ -154,8 +154,8 @@ function list2gpu(K::Dict)
             nz1[i] = 1
             nz2[i] = length(el)
         else
-            nz1[i] = nz2[i-1]+1
-            nz2[i] = nz2[i-1]+length(el)
+            nz1[i] = nz2[i - 1] + 1
+            nz2[i] = nz2[i - 1] + length(el)
         end
 
         for (k, j) in enumerate(nz1[i]:nz2[i])
@@ -164,7 +164,7 @@ function list2gpu(K::Dict)
     end
     K_d, n1_d, n2_d = CuArray(KK), CuArray(nz1), CuArray(nz2)
 
-    graph_d = CuGraph(K_d, n1_d, n2_d)
+    return graph_d = CuGraph(K_d, n1_d, n2_d)
 end
 
 function move2device(K, U, gr, source)
@@ -187,26 +187,26 @@ function move2device(K, U, gr, source)
 
     # allocate dictionary containing best previous nodes
     p = CUDA.zeros(Int32, n)
- 
+
     # priority queue containing NOT settled nodes
     Q = CuVector(fill(false, n))
 
     # # 1st frontier: nodes adjacent to the source
     # isource = K.rowval[nzrange(K, source)]
     # Q[isource] .= true
- 
+
     # initialise all distances as infinity and zero at the source node 
     tmp = fill(Inf, n)
-    tmp[source] = 0 
+    tmp[source] = 0
     dist = CuArray{Float32}(tmp)
     dist0 = deepcopy(dist)
 
     return element_connectivity_d, e2n_d, mesh_d, Q, dist, dist0, p
-
 end
 
-function bfm_gpu(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Int, gr, U::AbstractArray{T}) where {M,T}
-
+function bfm_gpu(
+    G::SparseMatrixCSC{Bool,M}, halo::Matrix, source::Int, gr, U::AbstractArray{T}
+) where {M,T}
     element_connectivity_d, e2n_d, mesh_d, Q, dist, dist0, p = move2device(G, U, gr, source)
 
     # allocate dictionary containing best previous nodes
@@ -218,19 +218,11 @@ function bfm_gpu(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Int, gr, U::
 
     # main loop
     it = 1
-    
+
     # covergence: if the queue is empty we are done
     @inbounds while sum(Q) != 0
         # relax edges (parallel process)         
-        relaxation_BFM2!(
-            Q, 
-            dist, 
-            dist0, 
-            p, 
-            mesh_d, 
-            element_connectivity_d,
-            e2n_d
-        )
+        relaxation_BFM2!(Q, dist, dist0, p, mesh_d, element_connectivity_d, e2n_d)
 
         # update_halo!(p, dist, dist0, halo_d)
         update_halo2!(p, dist, dist0, halo_d)
@@ -239,14 +231,14 @@ function bfm_gpu(G::SparseMatrixCSC{Bool, M}, halo::Matrix, source::Int, gr, U::
         CUDA.fill!(Q, false)
 
         # update nodal queue (parallel process)
-        update_Q!(Q,  dist, dist0, element_connectivity_d, e2n_d)
+        update_Q!(Q, dist, dist0, element_connectivity_d, e2n_d)
         # @btime update_Q!($Q, $G, $dist, $dist0, $e2n)
 
         # update old distance vector (TODO parallel version)
         copyto!(dist0, dist)
 
         # update iteration counter
-        it+=1
+        it += 1
     end
 
     println("Converged in $it iterations")
@@ -266,7 +258,7 @@ function _init_halo!(p, halo_d, n)
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     if index ≤ n
         h1::Int = halo_d[index, 1]
         h2::Int = halo_d[index, 2]
@@ -274,15 +266,15 @@ function _init_halo!(p, halo_d, n)
         p[h1] = h2
     end
 
-    return 
+    return nothing
 end
 
 function init_halo!(p::CuArray, halo_d::CuArray)
     n = size(halo_d, 1) ÷ 2
     nt = 256
-    numblocks = ceil(Int, size(halo_d, 1)/nt)
+    numblocks = ceil(Int, size(halo_d, 1) / nt)
     CUDA.@sync begin
-        @cuda threads = nt blocks = numblocks _init_halo!(p, halo_d, n+1)
+        @cuda threads = nt blocks = numblocks _init_halo!(p, halo_d, n + 1)
     end
 end
 
@@ -290,7 +282,7 @@ function _update_halo!(p, dist, dist0, halo_d)
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     if index ≤ size(halo_d, 1)
         @inbounds h1::Int = halo_d[index, 1]
         @inbounds h2::Int = halo_d[index, 2]
@@ -300,18 +292,17 @@ function _update_halo!(p, dist, dist0, halo_d)
         end
     end
 
-    return 
+    return nothing
 end
 
 function update_halo!(p::CuVector, dist::CuVector, dist0::CuVector, halo_d::CuMatrix)
     n = size(halo_d, 1) ÷ 2
     nt = 256
-    numblocks = ceil(Int, size(halo_d, 1)/nt)
+    numblocks = ceil(Int, size(halo_d, 1) / nt)
     CUDA.@sync begin
         @cuda threads = nt blocks = numblocks _update_halo!(p, dist, dist0, halo_d)
     end
 end
-
 
 function _update_halo2!(p, dist, dist0, halo_d)
 
@@ -323,17 +314,16 @@ function _update_halo2!(p, dist, dist0, halo_d)
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     # tid = threadIdx().x
 
     @inbounds if index ≤ size(halo_d, 1)
-
         h1::Int = halo_d[index, 1]
         h2::Int = halo_d[index, 2]
-        
-        dh1[tid] = dist[h1] 
-        dh2[tid] = dist[h2] 
-        d0h2[tid] = dist0[h2] 
+
+        dh1[tid] = dist[h1]
+        dh2[tid] = dist[h2]
+        d0h2[tid] = dist0[h2]
         synchronize()
 
         # dh1::Float32 = dist[h1] 
@@ -346,16 +336,20 @@ function _update_halo2!(p, dist, dist0, halo_d)
         end
     end
 
-    return 
+    return nothing
 end
 
-function update_halo2!(p::CuVector, dist::CuVector{T}, dist0::CuVector{T}, halo_d::CuMatrix) where T
+function update_halo2!(
+    p::CuVector, dist::CuVector{T}, dist0::CuVector{T}, halo_d::CuMatrix
+) where {T}
     nt = 256
     mem = (3 * nt * sizeof(T))
 
-    numblocks = ceil(Int, size(halo_d, 1)/nt)
+    numblocks = ceil(Int, size(halo_d, 1) / nt)
     CUDA.@sync begin
-        @cuda threads = nt blocks = numblocks shmem=mem _update_halo!(p, dist, dist0, halo_d)
+        @cuda threads = nt blocks = numblocks shmem = mem _update_halo!(
+            p, dist, dist0, halo_d
+        )
     end
 end
 
@@ -363,7 +357,7 @@ function _init_Q!(Q, K, e2n, n11, n21, n12, n22, source)
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     if index == source
         @inbounds for i in n11[index]:n21[index]
             element::Int32 = K[i]
@@ -373,19 +367,23 @@ function _init_Q!(Q, K, e2n, n11, n21, n12, n22, source)
         end
     end
 
-    return 
+    return nothing
 end
 
 function init_Q!(Q::CuArray{Bool}, element_connectivity_d::CuGraph, e2n_d::CuGraph, source)
     # unpack graph arrays
-    K, n11, n21 = element_connectivity_d.K, element_connectivity_d.n1, element_connectivity_d.n2
+    K, n11, n21 = element_connectivity_d.K,
+    element_connectivity_d.n1,
+    element_connectivity_d.n2
     e2n, n12, n22 = e2n_d.K, e2n_d.n1, e2n_d.n2
 
     nt = 256
-    numblocks = ceil(Int, length(Q)/nt)
+    numblocks = ceil(Int, length(Q) / nt)
 
     CUDA.@sync begin
-        @cuda threads = nt blocks = numblocks _init_Q!(Q, K, e2n, n11, n21, n12, n22, source)
+        @cuda threads = nt blocks = numblocks _init_Q!(
+            Q, K, e2n, n11, n21, n12, n22, source
+        )
     end
 end
 
@@ -393,11 +391,10 @@ function _update_Q!(Q, K, e2n, dist, dist0, n11, n21, n12, n22)
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     inf = typemax(eltype(dist))
     if index ≤ length(Q)
         @inbounds if (dist[index] < inf) && (dist[index] < dist0[index])
-
             for i in n11[index]:n21[index]
                 element::Int32 = K[i]
                 for j in n12[element]:n22[element]
@@ -406,26 +403,34 @@ function _update_Q!(Q, K, e2n, dist, dist0, n11, n21, n12, n22)
                     Q[node] = true
                 end
             end
-
         end
     end
 
-    return 
+    return nothing
 end
 
-function update_Q!(Q::CuVector{Bool}, dist::CuVector, dist0::CuVector, element_connectivity_d::CuGraph, e2n_d::CuGraph)
+function update_Q!(
+    Q::CuVector{Bool},
+    dist::CuVector,
+    dist0::CuVector,
+    element_connectivity_d::CuGraph,
+    e2n_d::CuGraph,
+)
     # unpack graph arrays
-    K, n11, n21 = element_connectivity_d.K, element_connectivity_d.n1, element_connectivity_d.n2
+    K, n11, n21 = element_connectivity_d.K,
+    element_connectivity_d.n1,
+    element_connectivity_d.n2
     e2n, n12, n22 = e2n_d.K, e2n_d.n1, e2n_d.n2
 
     nt = 256
-    numblocks = ceil(Int, length(Q)/nt)
+    numblocks = ceil(Int, length(Q) / nt)
 
     CUDA.@sync begin
-        @cuda threads = nt blocks = numblocks _update_Q!(Q, K, e2n, dist, dist0, n11, n21, n12, n22)
+        @cuda threads = nt blocks = numblocks _update_Q!(
+            Q, K, e2n, dist, dist0, n11, n21, n12, n22
+        )
     end
 end
-
 
 function _update_Q2!(Q, K, e2n, dist, dist0, n11, n21, n12, n22)
 
@@ -435,13 +440,12 @@ function _update_Q2!(Q, K, e2n, dist, dist0, n11, n21, n12, n22)
     # update queue: if new distance is smaller 
     # than the previous one, add to adjecent 
     # to the queue nodes
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     tid = threadIdx().x
     inf = typemax(Float32)
-    
+
     if index ≤ length(Q)
         @inbounds if (dist[index] < inf) && (dist[index] < dist0[index])
-
             for i in n11[index]:n21[index]
                 element::Int32 = K[i]
                 for j in n12[element]:n22[element]
@@ -449,42 +453,49 @@ function _update_Q2!(Q, K, e2n, dist, dist0, n11, n21, n12, n22)
                     Q[e2n[j]] = true
                 end
             end
-
         end
     end
 
-    return 
+    return nothing
 end
 
-function update_Q2!(Q::CuVector{Bool}, dist::CuVector, dist0::CuVector, element_connectivity_d::CuGraph, e2n_d::CuGraph)
+function update_Q2!(
+    Q::CuVector{Bool},
+    dist::CuVector,
+    dist0::CuVector,
+    element_connectivity_d::CuGraph,
+    e2n_d::CuGraph,
+)
     # unpack graph arrays
-    K, n11, n21 = element_connectivity_d.K, element_connectivity_d.n1, element_connectivity_d.n2
+    K, n11, n21 = element_connectivity_d.K,
+    element_connectivity_d.n1,
+    element_connectivity_d.n2
     e2n, n12, n22 = e2n_d.K, e2n_d.n1, e2n_d.n2
 
     nt = 256
-    numblocks = ceil(Int, length(Q)/nt)
+    numblocks = ceil(Int, length(Q) / nt)
 
-    mem = sum(a[i] for i in length(a)-nt:length(a)) *sizeof(Float32)
+    mem = sum(a[i] for i in (length(a) - nt):length(a)) * sizeof(Float32)
 
     CUDA.@sync begin
-        @cuda threads = nt blocks = numblocks shmem = mem _update_Q!(Q, K, e2n, dist, dist0, n11, n21, n12, n22)
+        @cuda threads = nt blocks = numblocks shmem = mem _update_Q!(
+            Q, K, e2n, dist, dist0, n11, n21, n12, n22
+        )
     end
 end
 
 function _gpu_relaxation_BFM2!(Q, K, e2n, p, dist, dist0, n11, n21, n12, n22, x, z, U)
-
-    index = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     T = typemax(Float32)
 
     if index ≤ length(Q)
-
         @inbounds if Q[index]
 
             # read coordinates, velocity and distance of frontier node
             di::Float32 = dist0[index]
             xi::Float32, zi::Float32 = x[index], z[index]
             Ui::Float32 = U[index]
-            
+
             # xi::Float64, zi::Float64, Ui::Float64 = x[index], z[index], U[index]
             for i in n11[index]:n21[index]
                 element::Int32 = K[i]
@@ -494,7 +505,7 @@ function _gpu_relaxation_BFM2!(Q, K, e2n, p, dist, dist0, n11, n21, n12, n22, x,
                     δ = ifelse(
                         dist0[Gi] == T,
                         T,
-                        dist0[Gi] + 2*distance(xi, zi, x[Gi], z[Gi])/(Ui + U[Gi])
+                        dist0[Gi] + 2 * distance(xi, zi, x[Gi], z[Gi]) / (Ui + U[Gi]),
                     )
 
                     # update distance and predecessor index 
@@ -505,36 +516,40 @@ function _gpu_relaxation_BFM2!(Q, K, e2n, p, dist, dist0, n11, n21, n12, n22, x,
                     end
                 end
             end
-            
+
             # update distance
             dist[index] = di
         end
     end
 
-    return
+    return nothing
 end
 
 function relaxation_BFM2!(
-    Q::CuArray{Bool}, 
-    dist::CuArray, 
-    dist0::CuArray, 
-    p::CuArray, 
-    mesh_d::CuMesh2D, 
+    Q::CuArray{Bool},
+    dist::CuArray,
+    dist0::CuArray,
+    p::CuArray,
+    mesh_d::CuMesh2D,
     element_connectivity_d::CuGraph,
-    e2n_d::CuGraph
+    e2n_d::CuGraph,
 )
 
     # unpack graph arrays
-    K, n11, n21 = element_connectivity_d.K, element_connectivity_d.n1, element_connectivity_d.n2
+    K, n11, n21 = element_connectivity_d.K,
+    element_connectivity_d.n1,
+    element_connectivity_d.n2
     e2n, n12, n22 = e2n_d.K, e2n_d.n1, e2n_d.n2
 
     # unpack coordinates and velocity
     (; x, z, U) = mesh_d
 
     nt = 256
-    numblocks = ceil(Int, length(Q)/nt)
+    numblocks = ceil(Int, length(Q) / nt)
 
     CUDA.@sync begin
-        @cuda threads = nt blocks = numblocks _gpu_relaxation_BFM2!(Q, K, e2n, p, dist, dist0, n11, n21, n12, n22, x, z, U)
+        @cuda threads = nt blocks = numblocks _gpu_relaxation_BFM2!(
+            Q, K, e2n, p, dist, dist0, n11, n21, n12, n22, x, z, U
+        )
     end
 end
